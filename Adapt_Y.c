@@ -1,4 +1,4 @@
-//----- Start of code section for horizontal fields of DISPLAYx -------
+//----- Start of code section for vertical fields of DISPLAYx -------
 // t4:PH1:MAGV2  t5:Max_height-1 t6:Max_height:DY2 t7:DH2 v0:result_acc
 //---------------------------------------------------------------------
 // .------.-------.------------.---------------------------------------.-------.
@@ -91,4 +91,4 @@
 	"or $v0,$v0,$t0\n\t"        //Accumulate MAGV field to DISPLAYx value in v0
 	"dsll $t0,$t6,12\n\t"       //t0=DY2 aligned for DISPLAYx
 	"or $v0,$v0,$t0\n\t"        //Accumulate DY field to DISPLAYx value in v0
-//----- End of code section for horizontal fields of DISPLAYx -----
+//----- End of code section for vertical fields of DISPLAYx -----
