@@ -2,8 +2,6 @@ PACKAGE = GSM
 EE_BIN = $(PACKAGE).ELF
 EE_OBJS := iomanx.o filexio.o ps2fs.o fakehost.o loader.o elf.o
 EE_OBJS += timer.o pad.o
-EE_OBJS += screenshot.o
-EE_OBJS += splash.o
 EE_OBJS += gsm.o  
 	
 PS2_IP = 192.168.0.10
