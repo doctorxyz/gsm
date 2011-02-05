@@ -5,7 +5,7 @@
 /*
 # GS Mode Selector - Force (set and keep) a GS Mode, then load & exec a PS2 ELF
 #------------------------------------------------------------------------------
-# Copyright 2009, 2010 doctorxyz & dlanor
+# Copyright 2009, 2010, 2011 doctorxyz & dlanor
 # Licenced under Academic Free License version 2.0
 # Review LICENSE file for further details.
 */
@@ -36,8 +36,6 @@
 
 #include <libjpg.h>
 
-#include "screenshot.h"
-
 int	patcher_enabled = 0;
 
 // SetGsCrt params
@@ -48,9 +46,6 @@ volatile u32 act_height;
 // GS Registers
 #define GS_BGCOLOUR *((volatile unsigned long int*)0x120000E0)
 volatile u64 display, syncv, act_syncv, smode2;
-
-// DisplayX GS Registers (presets, requested and calculated)
-volatile u64 display_presets, display_requested, display_calculated;
 
 // DisplayX GS Registers' Bit Fields
 //RA/doctorxyz NB: Into GSM and gsKit, gs_dw and gs_dh are 1 unit higher than the real GS register values
@@ -66,26 +61,12 @@ typedef struct gsm_vmode {
 	u64 smode2;
 } GSM_vmode;
 
-u32	user_vmode_slots = 16;	//Must be a power of two (uses bitmask = value-1)
+typedef struct gsm_exit_option {
+	u8	id;
+	char description[12];
+	char elf_path[0x40];
+} GSM_exit_option;
 
-GSM_vmode user_vmode[16] = {
-	{0, 0, 0, 0, 0, 0},
-	{0, 0, 0, 0, 0, 0},
-	{0, 0, 0, 0, 0, 0},
-	{0, 0, 0, 0, 0, 0},
-	{0, 0, 0, 0, 0, 0},
-	{0, 0, 0, 0, 0, 0},
-	{0, 0, 0, 0, 0, 0},
-	{0, 0, 0, 0, 0, 0},
-	{0, 0, 0, 0, 0, 0},
-	{0, 0, 0, 0, 0, 0},
-	{0, 0, 0, 0, 0, 0},
-	{0, 0, 0, 0, 0, 0},
-	{0, 0, 0, 0, 0, 0},
-	{0, 0, 0, 0, 0, 0},
-	{0, 0, 0, 0, 0, 0},
-	{0, 0, 0, 0, 0, 0}
-};
 
 // gsKit Color vars
 // Object Creation Macro for RGBAQ Color Values
@@ -159,14 +140,8 @@ typedef struct gsm_predef_vmode {
 
 struct gsm_settings *GSM = NULL;
 
-char ROMVER_data[20]; 	//16 byte file read from rom0:ROMVER at init
-
 // Prototypes for External Functions
 void RunLoaderElf(char *filename, char *);
-
-//Splash Screen
-extern u32 size_splash;
-extern void splash;
 
 //Variadic macro by doctorxyz
 #define gsKit_fontm_printf_scaled(gsGlobal, gsFontM, X, Y, Z, scale, color, format, args...) \
@@ -198,47 +173,9 @@ extern void splash;
 #define MAKE_J(func)		(u32)( (0x02 << 26) | (((u32)func) / 4) )	// Jump (MIPS instruction)
 #define NOP					0x00000000									// No Operation (MIPS instruction)
 
-#define MAX_PATH 260
+#include "engine.c"
 
-/*
-// To make the reset and flush the GS in GSM, possible!!!
-#define GS_REG_CSR		(volatile u64 *)0x12001000
-#define GS_SET_CSR(A,B,C,D,E,F,G,H,I,J,K,L) \
-    (u64)(A & 0x00000001) <<  0 | (u64)(B & 0x00000001) <<  1 | \
-    (u64)(C & 0x00000001) <<  2 | (u64)(D & 0x00000001) <<  3 | \
-    (u64)(E & 0x00000001) <<  4 | (u64)(F & 0x00000001) <<  8 | \
-    (u64)(G & 0x00000001) <<  9 | (u64)(H & 0x00000001) << 12 | \
-    (u64)(I & 0x00000001) << 13 | (u64)(J & 0x00000003) << 14 | \
-    (u64)(K & 0x000000FF) << 16 | (u64)(L & 0x000000FF) << 24
-*/
-
-#include "TSR.c"
-
-#include "MISC.c"
-
-//----------------------------------------------------------------------------
-void setNormalAdaption(void) //Should be called before exiting main program
-{
-	set_kmode();
-	Adapt_Flags &= 0xFFFFFF00; //Clear 1 byte flag of 4
-  set_umode();
-
-}
-
-//----------------------------------------------------------------------------
-/* Update parameters to be forced by ModdedSetGsCrt and DisplayHandler TSR functions */
-void UpdateModdedSetGsCrtDisplayHandlerParams(u32 interlace, u32 mode, u32 field, u64 display, u64 syncv, u64 smode2)
-{
-	set_kmode();
-	Target_Interlace = interlace;
-	Target_Mode = mode;
-	Target_Field = field;
-	Target_Display = display;
-	Target_SyncV = syncv;
-	Target_SMode2 = smode2;
-	Adapt_SMode2 = (u8) smode2;
-  	set_umode();
-}
+#include "misc.c"
 
 //----------------------------------------------------------------------------
 void Timer_delay(int timeout){ //Will delay at least timeout ms (at most 1 more)
@@ -250,31 +187,11 @@ void Timer_delay(int timeout){ //Will delay at least timeout ms (at most 1 more)
 //----------------------------------------------------------------------------
 void	CleanUp(void)
 {
-	setNormalAdaption();
 	TimerEnd();
 	padPortClose(1,0);
 	padPortClose(0,0);
 	padEnd();
 }
-
-//-------------------------------------------------------------------------
-// GetROMVersion - reads version of PS2 ROM
-// Taken from the ps2menu.c file, from the PS2Menu project
-//-------------------------------------------------------------------------
-int GetROMVersion(void)
-{
-	int fd;
-
-	fd = open("rom0:ROMVER", O_RDONLY);
-	if(fd < 0)
-		return 0; //Return 0 for unidentified version
-	read(fd, ROMVER_data, 14);
-	ROMVER_data[14]=0;
-	close(fd);
-	return 1; //Return 1 for identified version
-}
-//endfunc GetROMVersion
-//----------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------------------------------------------------
 // Clear_Screen - Taken from the fmcb1.7 sources
@@ -301,10 +218,7 @@ void Clear_Screen(void)
 //----------------------------------------------------------------------------
 void Setup_GS()
 {
-/*
-	// Reset and flush the GS
-	*GS_REG_CSR = GS_SET_CSR(0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0);
-*/
+
 	// GS Init
 
 	//The following line eliminates overflow
@@ -316,12 +230,8 @@ void Setup_GS()
 	gsGlobal->ZBuffering      = GS_SETTING_OFF;
 
 
-/*	// DMAC Init
-	dmaKit_init(D_CTRL_RELE_OFF,D_CTRL_MFD_OFF, D_CTRL_STS_UNSPEC, D_CTRL_STD_OFF, D_CTRL_RCYC_8, 1 << DMA_CHANNEL_GIF);
-	dmaKit_chan_init(DMA_CHANNEL_GIF);
-*/
-
 	gsGlobal->Width = 640;
+
 	if(gsKit_detect_signal() == GS_MODE_NTSC) {
 		gsGlobal->Height = 448;
 	} else {
@@ -362,14 +272,12 @@ void Setup_GS()
 	// gsGlobal->Height
 	gsKit_init_screen(gsGlobal);
 
-	printf("gsGlobal:\nInterlace %01d, Mode 0x%02X, Field %01d\nWidth %04d,Height %04d\nDX %04d, DY %04d\nMAGH %02d, MAGV %01d\nDW %04d, DH=%04d\n", \
-	gsGlobal->Interlace, gsGlobal->Mode, gsGlobal->Field, gsGlobal->Width, gsGlobal->Height, gsGlobal->StartX, gsGlobal->StartY, gsGlobal->MagH, gsGlobal->MagV, gsGlobal->DW, gsGlobal->DH);
-	
 	gsKit_mode_switch(gsGlobal, GS_ONESHOT);
 	gsKit_clear(gsGlobal, Black);
 
 	//Enable transparency
 	gsGlobal->PrimAlphaEnable = GS_SETTING_ON;
+
 }
 //----------------------------------------------------------------------------
 //endfunc Setup_GS
@@ -395,136 +303,7 @@ void Draw_Screen(void)
 //endfunc Draw_Screen
 //----------------------------------------------------------------------------
 
-//----------------------------------------------------------------------------
-//Use XBRA protocol to unlink an old instance of GSM, if any such is active
-void unlink_GSM()
-{
-	u32 SyscallVectorTableAddress;
-	u32 SetGsCrtVectorAddress;
-	u32 SetGsCrt_Addr;
-	XBRA_header *setGsCrt_XBRA_p;
-
-	SyscallVectorTableAddress = GetSyscallVectorTableAddress();
-	SetGsCrtVectorAddress = SyscallVectorTableAddress + 2 * 4;
-	
-	set_kmode();
-	syscallTable = (void *) SyscallVectorTableAddress;
-	SetGsCrt_Addr = *(volatile u32 *)SetGsCrtVectorAddress;
-	setGsCrt_XBRA_p = (XBRA_header *)(SetGsCrt_Addr - XB_code);
-
-	if((setGsCrt_XBRA_p -> xb_magic == XBRA_MAGIC)
-	&& (setGsCrt_XBRA_p -> xb_id == GSM__MAGIC)
-	){
-		//Here we need to abort an old install, as GSM is already active.
-		//So we unlink that old install before linking in the new one
-		//It has to be done this way because the new instance may execute
-		//in a different KSEG location, for game compatibility reasons
-		//Note that similar unlinking is not needed for DisplayHandler,
-		//since this debug trap routine is not chained to any previous instance,
-		//as each new instance completely replaces any old one.
-		//But care must still be taken so as not to crash the console by making
-		//vmode changes through setGsCrt in a half initialized state
-		SetGsCrt_Addr = setGsCrt_XBRA_p -> xb_next;
-		*(volatile u32 *)SetGsCrtVectorAddress = SetGsCrt_Addr;	//unlink setGsCrt of old GSM
-	}
-}
-
-//----------------------------------------------------------------------------
-// Install GS (Graphics Sinthesizer) Mode Selector
-void installGSModeSelector()
-{
-	u32 SyscallVectorTableAddress;
-	u32 SetGsCrtVectorAddress;
-	u32 SetGsCrt_Addr;
-	XBRA_header *setGsCrt_XBRA_p;
-
-	SyscallVectorTableAddress = GetSyscallVectorTableAddress();
-	SetGsCrtVectorAddress = SyscallVectorTableAddress + 2 * 4;
-	
-	printf("Syscall Vector Table found at 0x%08x\n", SyscallVectorTableAddress);
-	   
-	// Install sceGsSetCrt patcher
-	// Syscall hooked: Syscall #2 (SetGsCrt)
-	set_kmode();
-	Adapt_Flags = 0x00000001;						//Init 4 byte flags
-	set_umode();
-
-	set_kmode();
-	syscallTable = (void *) SyscallVectorTableAddress;
-	SetGsCrt_Addr = *(volatile u32 *)SetGsCrtVectorAddress;
-	setGsCrt_XBRA_p = (XBRA_header *)(SetGsCrt_Addr - XB_code);
-
-	//Note that this routine is no longer responsible for unlinking old instances
-	//It is assumed that this is done previously by a call to unlink_GSM
-	//performed before the new routines were copied to KSEG RAM (already done)
-
-	//Here we are ready to link in the new setGsCrt routine of a new GSM instance
-	setGsCrt_XBRA_p = (XBRA_header *)(KSEG_ModdedSetGsCrt_entry_p - XB_code);
-	sceSetGsCrt = (void *) SetGsCrt_Addr;
-	setGsCrt_XBRA_p -> xb_next = (u32) sceSetGsCrt;
-	*(volatile u32 *)SetGsCrtVectorAddress = (int)KSEG_ModdedSetGsCrt_entry_p;
-	set_umode();
-
-	printf("SyscallVectorTableAddress[2]\n");
-	printf(" [BEFORE]SetGsCrt       = 0x%08x\n", SetGsCrt_Addr);
-	printf(" [AFTER ]ModdedSetGsCrt = 0x%08x\n\n", (int)KSEG_ModdedSetGsCrt_entry_p);
-
-	printf("[BEFORE] Core Debug Exception Handler (V_DEBUG handler)\n");
-
-	// Install Display Handler in place of the Core Debug Exception Handler (V_DEBUG handler)
-	// Exception Vector Address for Debug Level 2 Exception when Stadus.DEV bit is 0 (normal): 0x80000100
-	// 'Level 2' is a generalization of Error Level (from previous MIPS processors)
-	// When this exception is recognized, control is transferred to the applicable service routine;
-	// in our case the service routine is 'DisplayHandler'!
-	
-	set_kmode();
-	*(volatile u32 *)0x80000100 = MAKE_J((int)KSEG_DisplayHandler_entry_p);
-	*(volatile u32 *)0x80000104 = 0;
-	set_umode();
-
-	printf("[AFTER ] DisplayHandler -> J 0x%08x\n", (int)KSEG_DisplayHandler_entry_p);
-    
-	// Set Data Address Write Breakpoint
-	// Trap writes to GS registers, so as to control their values
-	__asm__ __volatile__ (
-	".set noreorder\n"
-	".set noat\n"
-	
-	"li $a0, 0x12000000\n"	// Address base for trapping
-	"li $a1, 0x1FFFFF1F\n"	// Address mask for trapping
-	//We trap writes to 0x12000000 + 0x00,0x20,0x40,0x60,0x80,0xA0,0xC0,0xE0
-	//We only want 0x20, 0x60, 0x80, 0xA0, but can't mask for that combination
-	//But the trapping range is now extended to match all kernel access segments
-
-	"di\n"									// Disable Interupts
-	"sync\n"								// Wait until the preceding loads are completed
-
-	"ori $k0, $zero, 0x8000\n"
-	"mtc0 $k0, $24\n"			// All breakpoints off (BED = 1)
-	"sync.p\n"						// Await instruction completion
-	"mtdab	$a0\n"
-	"mtdabm	$a1\n"
-	"sync.p\n"						// Await instruction completion
-	"mfc0 $k1, $24\n"
-	"sync.p\n"						// Await instruction completion
-
-	"lui $k0, 0x2020\n"			// Data write breakpoint on (DWE, DUE = 1)
-	"or $k1, $k1, $k0\n"
-	"xori $k1, $k1, 0x8000\n"		// DEBUG exception trigger on (BED = 0)
-	"mtc0 $k1, $24\n"
-	"sync.p\n"						//  Await instruction completion
-
-	"ei\n"						// Enable Interupts
-	"nop\n"
-	"nop\n"
-	
-	".set at\n"
-	".set reorder\n"
-	);
-
-	printf("Now, writes to the GS registers we need to control are trapped!\n\n");
-
-}
+#include "api.c"
 
 #include "main.c"
 
