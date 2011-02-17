@@ -1,10 +1,9 @@
 #define TITLE			"Graphics Synthesizer Mode Selector"
-#define VERSION			"0.23x2"
+#define VERSION			"0.28"
 #define AUTHORS			"doctorxyz and dlanor"
-#define CNF_VERSION	"v0.23s2" //GSM version which defined current CNF format
 /*
-# GS Mode Selector - Force (set and keep) a GS Mode, then load & exec a PS2 ELF
-#------------------------------------------------------------------------------
+# Graphics Synthesizer Mode Selector (a.k.a. GSM) - Force (set and keep) a GS Mode, then load & exec a PS2 ELF
+#-------------------------------------------------------------------------------------------------------------
 # Copyright 2009, 2010, 2011 doctorxyz & dlanor
 # Licenced under Academic Free License version 2.0
 # Review LICENSE file for further details.
@@ -21,7 +20,6 @@
 #include <fileio.h>
 #include <string.h>
 #include <libmc.h>
-#include <hw.h>
 #include <libpad.h>
 
 #include <sys/fcntl.h>
@@ -39,9 +37,7 @@
 int	patcher_enabled = 0;
 
 // SetGsCrt params
-volatile u32 interlace, mode, field;
-volatile u32 act_interlace, act_mode, act_field;
-volatile u32 act_height;
+volatile u32 interlace, mode, ffmd;
 
 // GS Registers
 #define GS_BGCOLOUR *((volatile unsigned long int*)0x120000E0)
@@ -58,7 +54,7 @@ typedef struct gsm_vmode {
 	u32	field;
 	u64	display;
 	u64	syncv;
-	u64 smode2;
+	u64	smode2;
 } GSM_vmode;
 
 typedef struct gsm_exit_option {
@@ -133,7 +129,7 @@ typedef struct gsm_predef_vmode {
 	char description[36];
 	u8	interlace;
 	u8	mode;
-	u8	field;
+	u8	ffmd;
 	u64	display;
 	u64	syncv;
 } GSM_predef_vmode;
@@ -172,8 +168,6 @@ void RunLoaderElf(char *filename, char *);
 	
 #define MAKE_J(func)		(u32)( (0x02 << 26) | (((u32)func) / 4) )	// Jump (MIPS instruction)
 #define NOP					0x00000000									// No Operation (MIPS instruction)
-
-#include "engine.c"
 
 #include "misc.c"
 
@@ -227,6 +221,7 @@ void Setup_GS()
 	// Buffer Init
 	gsGlobal->PrimAAEnable = GS_SETTING_ON;
 	gsGlobal->DoubleBuffering = GS_SETTING_OFF;
+
 	gsGlobal->ZBuffering      = GS_SETTING_OFF;
 
 
@@ -248,7 +243,7 @@ void Setup_GS()
 	if(patcher_enabled == 1) {
 		gsGlobal->Mode = mode;
 		gsGlobal->Interlace = interlace;
-		gsGlobal->Field = field;
+		gsGlobal->Field = ffmd;
 		//gsGlobal->Height = (gs_dh / (gs_magv+1)); 
 		//Trying to solve GSM OSD gsKit issues, using the example "basic.c - Example demonstrating basic gsKit operation"
 		if(mode == GS_MODE_DTV_1080I) {
