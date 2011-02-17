@@ -2,25 +2,15 @@ PACKAGE = GSM
 EE_BIN = $(PACKAGE).ELF
 EE_OBJS := iomanx.o filexio.o ps2fs.o fakehost.o loader.o elf.o
 EE_OBJS += timer.o pad.o
+EE_OBJS += engine.o  
 EE_OBJS += gsm.o  
 	
-PS2_IP = 192.168.0.10
-
 EE_INCS += -I$(PS2SDK)/ports/include -I$(GSKIT)/include -I$(GSKIT)/ee/dma/include -I$(GSKIT)/ee/gs/include -I$(GSKIT)/ee/toolkit/include
 
-#EE_LDFLAGS := -L$(GSKIT)/lib
-#EE_LDFLAGS += -L$(PS2DEV)/libjpg
-
-
-#EE_LIBS := -lfileXio -lmc -lpad
 EE_LIBS = -L$(PS2SDK)/ports/lib -L$(GSKIT)/lib -lgskit -ldmakit -ljpeg
 EE_LIBS += -lfileXio -lmc -lpad
 
-#EE_CFLAGS += -save-temps
-
-#The EE_CFLAGS directive above should be commented out for MinGW+MSYS setups
-#Apparently that toolchain has some bug, causing this flag to generate errors
-#But it is very useful for debugging with a Cygwin or Linux toolchain
+EE_LDFLAGS = -Xlinker -Map -Xlinker 'uncompressed $(PACKAGE).map' -L$(PS2SDK)/ee/lib -Tlinkfile -nostartfiles
 
 all: $(EE_BIN)
 	 rm -f 'uncompressed $(PACKAGE).ELF'
@@ -51,8 +41,6 @@ clean:
 	$(MAKE) -C loader clean
 
 rebuild: clean all
-
-gsm.o: KSEG_Macros.h Adapt_X.c Adapt_Y.c
 
 iomanx.s:
 	bin2s irx/iomanX.irx iomanx.s iomanx_irx
