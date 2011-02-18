@@ -37,7 +37,7 @@ reset:
 	ps2client -h $(PS2_IP) reset
 
 clean:
-	rm -f *.ELF *.o *.a *.s *.i
+	rm -f *.ELF *.o *.a *.s *.i *.map
 	$(MAKE) -C loader clean
 
 rebuild: clean all

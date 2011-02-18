@@ -1,5 +1,5 @@
 #define TITLE			"Graphics Synthesizer Mode Selector"
-#define VERSION			"0.28"
+#define VERSION			"0.29"
 #define AUTHORS			"doctorxyz and dlanor"
 /*
 # Graphics Synthesizer Mode Selector (a.k.a. GSM) - Force (set and keep) a GS Mode, then load & exec a PS2 ELF
