@@ -23,6 +23,9 @@ extern volatile u8 DISPLAY_fix _GSM_ENGINE_;
 extern volatile u8 SMODE2_fix _GSM_ENGINE_;
 extern volatile u8 SYNCV_fix _GSM_ENGINE_;
 
+extern volatile u32 X_offset _GSM_ENGINE_;
+extern volatile u32 Y_offset _GSM_ENGINE_;
+
 extern volatile void Hook_SetGsCrt() _GSM_ENGINE_;
 extern volatile void GSHandler() _GSM_ENGINE_;
 
@@ -43,10 +46,13 @@ void UpdateGSMParams(u32 interlace, u32 mode, u32 ffmd, u64 display, u64 syncv, 
 	Target_DISPLAY 		= (u64) display;
 	Target_SYNCV 		= (u64) syncv;
 
-	DISPLAY_fix		= 0;	// Automatic Adaptation
-	DISPLAY_fix		= 0;	// DISPLAYx Fix
-	SMODE2_fix		= 1;	// SMODE2 Fix
-	SYNCV_fix		= 0;	// SYNCV Fix
+	automatic_adaptation	= 0;	// Automatic Adaptation -> 0 = On, 1 = Off ; Default = 0 = On
+	DISPLAY_fix		= 0;	// DISPLAYx Fix ---------> 0 = On, 1 = Off ; Default = 0 = On
+	SMODE2_fix		= 0;	// SMODE2 Fix -----------> 0 = On, 1 = Off ; Default = 0 = On
+	SYNCV_fix		= 0;	// SYNCV Fix ------------> 0 = On, 1 = Off ; Default = 0 = On
+
+	X_offset		= 0;	// X-axis offset
+	Y_offset		= 0;	// Y-axis offset
 
 	__asm__ __volatile__(
 		"sync.l;"

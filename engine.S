@@ -73,13 +73,20 @@ Target_DISPLAY:		.dword 0x001DF59F008230E8
 Target_SYNCV:		.dword 0x00C78C0001E00006
 
 .globl automatic_adaptation
-automatic_adaptation:		.byte 0			# Byte flag
+automatic_adaptation:	.byte 0			# Byte flag
 .globl DISPLAY_fix
 DISPLAY_fix:		.byte 0			# Byte flag
 .globl SMODE2_fix
 SMODE2_fix:		.byte 0			# Byte flag
 .globl SYNCV_fix
 SYNCV_fix:		.byte 0			# Byte flag
+
+.p2align 4	# align 16 bytes (IMPORTANT!!!)
+
+.globl X_offset
+X_offset:		.word 0			# X-axis offset
+.globl Y_offset
+Y_offset:		.word 0			# Y-axis offset
 
 .p2align 4	# align 16 bytes (IMPORTANT!!!)
 
@@ -353,30 +360,30 @@ nop
 # |    |   |         |01 Stand-by    11 Off              |
 # ^----^---^---------^-----------------------------------.
 have_SMODE2_write:
-lui $v0,0xB200												# v0 = GS base address in KSEG1
-andi $a3,$a3,0xFFFF										# a3 = GS register offset
-or	$a3,$a3,$v0												# a3 = GS register address in KSEG1
-sd $a1, %lo(Source_SMODE2)($a2)					# Source_SMODE2 = a1
-lb $v0, %lo(SMODE2_fix)($a2)					# v0 = SMODE2_fix
-bnel $v0,$zero,store_v0_as_SMODE2				# in case of  Separate SMODE2 fix disabled
-or $v0,$zero,$a1											# 	go use v0=a1 for SMODE2
-srl $v0,$a1,1												# v0 = a1 aligned for FFMD in bit0
-and	$v0,$v0,$a1											# v0 bit 0 = INT & FFMD
-andi $v0,$v0,1												# v0 bit 0 = INT & FFMD isolated
-sb $v0, %lo(DOUBLE_HEIGHT_adaptation)($a2)				# store Adapt_DoubleHeight flag
-beqz $v0,1f														# in case of  no DoubleHeight need
+lui $v0,0xB200						# v0 = GS base address in KSEG1
+andi $a3,$a3,0xFFFF					# a3 = GS register offset
+or	$a3,$a3,$v0					# a3 = GS register address in KSEG1
+sd $a1, %lo(Source_SMODE2)($a2)				# Source_SMODE2 = a1
+lb $v0, %lo(SMODE2_fix)($a2)				# v0 = SMODE2_fix
+bnel $v0,$zero,store_v0_as_SMODE2			# in case of  Separate SMODE2 fix disabled
+or $v0,$zero,$a1					# go use v0=a1 for SMODE2
+srl $v0,$a1,1						# v0 = a1 aligned for FFMD in bit0
+and	$v0,$v0,$a1					# v0 bit 0 = INT & FFMD
+andi $v0,$v0,1						# v0 bit 0 = INT & FFMD isolated
+sb $v0, %lo(DOUBLE_HEIGHT_adaptation)($a2)		# store Adapt_DoubleHeight flag
+beqz $v0,1f						# in case of  no DoubleHeight need
 ld $v0, %lo(Target_SMODE2)($a2)				# go use Target_SMODE2 as adapted SMode2
 																							# otherwise just set v0 = Target_SMODE2
-andi $a1,$a1,2												# a1 = FFMD of Source_SMODE2
-andi $v0,$v0,0xFFFD										# v0 = Target_SMODE2 without FFMD
-or $v0,$v0,$a1											# v0 = Target_SMODE2 + Source FFMD
-1: 												# Here v0 is adapted SMode2 value
-sb $v0, %lo(SMODE2_fix)($a2)						# Remember this adaption for later
+andi $a1,$a1,2						# a1 = FFMD of Source_SMODE2
+andi $v0,$v0,0xFFFD					# v0 = Target_SMODE2 without FFMD
+or $v0,$v0,$a1						# v0 = Target_SMODE2 + Source FFMD
+1: 							# Here v0 is adapted SMode2 value
+sb $v0, %lo(SMODE2_fix)($a2)				# Remember this adaption for later
 store_v0_as_SMODE2:
-sync.l				# The addition of these two lines (sync.l and sync.p) made a lot of titles compatible with GSM!
-sync.p				# These ones give a break to ee take a breath after patching and before enter original SetGsCrt
-beqzl	$zero,exit_GSHandler					# Now go exit
-sd $v0,0($a3)														# after storing GS_reg_SMODE2
+sync.l							# The addition of these two lines (sync.l and sync.p) made a lot of titles compatible with GSM!
+sync.p							# These ones give a break to ee take a breath after patching and before enter original SetGsCrt
+beqzl	$zero,exit_GSHandler				# Now go exit
+sd $v0,0($a3)						# after storing GS_reg_SMODE2
 
 #  ----------------------------
 # SYNCV
@@ -515,6 +522,16 @@ dsll32 $t0,$t7,0      # t0=DW2 aligned for DISPLAYx
 or $v0,$v0,$t0        # Accumulate DW field to DISPLAYx value in v0
 dsll $t0,$t4,23       # t0=MAGH2 aligned for DISPLAYx
 or $v0,$v0,$t0        # Accumulate MAGH field to DISPLAYx value in v0
+
+la	$t0, X_offset	# k0 = X-axis offset address
+lw	$t1, 0($t0)	# t1 = X-axis offset value (signed)
+add	$t6, $t6, $t1	# t6 = DX + X-axis offset (signed)
+bgez	$t6, gez_dx	# Is the result greater or equal to zero?
+nop
+move	$t6, $zero
+gez_dx:
+andi $t6,$t6,0x0FFF   # t6=DX2 masked
+
 or $v0,$v0,$t6        # Accumulate DX field to DISPLAYx value in v0
 # ----- End of code section for horizontal fields of DISPLAYx -----
 
@@ -615,6 +632,17 @@ dsll32 $t0,$t7,12     # t0=DH2 aligned for DISPLAYx
 or $v0,$v0,$t0        # Accumulate DH field to DISPLAYx value in v0
 dsll $t0,$t4,27       # t0=MAGV2 aligned for DISPLAYx
 or $v0,$v0,$t0        # Accumulate MAGV field to DISPLAYx value in v0
+
+la	$t0, Y_offset	# k0 = Y-axis offset address
+lw	$t1, 0($t0)	# t1 = Y-axis offset value (signed)
+add	$t6, $t6, $t1	# t6 = DY + Y-axis offset (signed)
+bgez	$t6, gez_dy	# Is the result greater or equal to zero?
+nop
+move	$t6, $zero
+gez_dy:
+andi $t6,$t6,0x07FF   # t6=DY2 masked
+
+
 dsll $t0,$t6,12       # t0=DY2 aligned for DISPLAYx
 or $v0,$v0,$t0        # Accumulate DY field to DISPLAYx value in v0
 # ----- End of code section for vertical fields of DISPLAYx -----
