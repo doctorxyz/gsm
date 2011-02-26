@@ -1,13 +1,16 @@
-#define TITLE			"Graphics Synthesizer Mode Selector"
-#define VERSION			"0.29"
-#define AUTHORS			"doctorxyz and dlanor"
 /*
+#
 # Graphics Synthesizer Mode Selector (a.k.a. GSM) - Force (set and keep) a GS Mode, then load & exec a PS2 ELF
 #-------------------------------------------------------------------------------------------------------------
 # Copyright 2009, 2010, 2011 doctorxyz & dlanor
 # Licenced under Academic Free License version 2.0
 # Review LICENSE file for further details.
+#
 */
+
+#define TITLE			"Graphics Synthesizer Mode Selector"
+#define VERSION			"0.36"
+#define AUTHORS			"doctorxyz and dlanor"
 
 #include <stdio.h>
 #include <kernel.h>
@@ -126,7 +129,7 @@ u64 WaitTime = 0; //used for time waiting
 typedef struct gsm_predef_vmode {
 	u8	id;
 	u8	category;
-	char description[36];
+	char description[34];
 	u8	interlace;
 	u8	mode;
 	u8	ffmd;
@@ -145,11 +148,8 @@ void RunLoaderElf(char *filename, char *);
 	gsKit_fontm_print_scaled(gsGlobal, gsFontM, X, Y, Z, scale, color, tempstr);
 	
 #define make_display_magic_number(dh, dw, magv, magh, dy, dx) \
-        (((u64)(dh-1)<<44) | ((u64)(dw-1)<<32) | ((u64)(magv)<<27) | \
+        (((u64)(dh)<<44) | ((u64)(dw)<<32) | ((u64)(magv)<<27) | \
          ((u64)(magh)<<23) | ((u64)(dy)<<12)   | ((u64)(dx)<<0)     )
-//RA NB: dw and dh are here 1 unit higher than the real GS register values
-//RA NB: so for a 480p resolution we use 480, though the register gets 479
-//RA NB: which is thus what we here embed in the bits of the return value
 
 // After some investigation, I found this interesting FONTM character number codes ;-)
 #define FONTM_CIRCLE			"\f0090"

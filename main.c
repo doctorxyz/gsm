@@ -1,3 +1,13 @@
+/*
+#
+# Graphics Synthesizer Mode Selector (a.k.a. GSM) - Force (set and keep) a GS Mode, then load & exec a PS2 ELF
+#-------------------------------------------------------------------------------------------------------------
+# Copyright 2009, 2010, 2011 doctorxyz & dlanor
+# Licenced under Academic Free License version 2.0
+# Review LICENSE file for further details.
+#
+*/
+
 int main(void)
 {   
 	//---------- Start of variables stuff ----------
@@ -16,21 +26,21 @@ int main(void)
 	//	--	--------	-----------		---------		----			 -----	   ----------------------------    --   --     ---- ---- --  --    ------------------
 	volatile static GSM_predef_vmode predef_vmode[15] = {
 
-		{  0, SDTV_VMODE,"NTSC-I                   ",	GS_INTERLACED,		GS_MODE_NTSC,		GS_FIELD,	(u64)make_display_magic_number( 448, 2560,   0,   3,   46, 700), 0x00C7800601A01801},
-		{  1, SDTV_VMODE,"NTSC-I Frame             ",	GS_INTERLACED,		GS_MODE_NTSC,		GS_FRAME,	(u64)make_display_magic_number( 224, 2560,   0,   3,   26, 700), 0x00C7800601A01802},
-		{  2, SDTV_VMODE,"PAL-I                    ",	GS_INTERLACED,		GS_MODE_PAL,		GS_FIELD,	(u64)make_display_magic_number( 512, 2560,   0,   3,   70, 720), 0x00A9000502101401},
-		{  3, SDTV_VMODE,"PAL-I  Frame             ",	GS_INTERLACED,		GS_MODE_PAL,		GS_FRAME,	(u64)make_display_magic_number( 256, 2560,   0,   3,   37, 720), 0x00A9000502101404},
-		{  4, SDTV_VMODE,"PAL60-I                  ",	GS_INTERLACED,		GS_MODE_PAL,		GS_FIELD,	(u64)make_display_magic_number( 448, 2560,   0,   3,   46, 700), 0x00C7800601A01801},
-		{  5, SDTV_VMODE,"PAL60-I Frame            ",	GS_INTERLACED,		GS_MODE_PAL,		GS_FRAME,	(u64)make_display_magic_number( 224, 2560,   0,   3,   26, 700), 0x00C7800601A01802},
-		{  6, PS1_VMODE, "PS1 NTSC (HDTV 480p@60Hz)",	GS_NONINTERLACED,	GS_MODE_DTV_480P,	GS_FRAME,	(u64)make_display_magic_number( 256, 2560,   0,   1,   12, 736), 0x00C78C0001E00006},
-		{  7, PS1_VMODE, "PS1 PAL (HDTV 576p@50Hz) ",	GS_NONINTERLACED,	GS_MODE_DTV_576P,	GS_FRAME,	(u64)make_display_magic_number( 256, 2560,   0,   1,   23, 756), 0x00A9000002700005},
-		{  8, HDTV_VMODE,"HDTV 480p@60Hz           ",	GS_NONINTERLACED,	GS_MODE_DTV_480P,	GS_FRAME, 	(u64)make_display_magic_number( 480, 1280,   0,   1,   51, 308), 0x00C78C0001E00006},
-		{  9, HDTV_VMODE,"HDTV 576p@50Hz           ",	GS_NONINTERLACED,	GS_MODE_DTV_576P,	GS_FRAME,	(u64)make_display_magic_number( 576, 1280,   0,   1,   64, 320), 0x00A9000002700005},
-		{ 10, HDTV_VMODE,"HDTV 720p@60Hz           ",	GS_NONINTERLACED,	GS_MODE_DTV_720P,	GS_FRAME, 	(u64)make_display_magic_number( 720, 1280,   1,   1,   24, 302), 0x00AB400001400005},
-		{ 11, HDTV_VMODE,"HDTV 1080i@60Hz           ",	GS_INTERLACED,		GS_MODE_DTV_1080I,	GS_FIELD, 	(u64)make_display_magic_number(1080, 1920,   1,   2,   48, 238), 0x0150E00201C00005},
-		{ 12, HDTV_VMODE,"HDTV 1080i@60Hz Frame    ",	GS_INTERLACED,		GS_MODE_DTV_1080I,	GS_FRAME, 	(u64)make_display_magic_number(1080, 1920,   0,   2,   48, 238), 0x0150E00201C00005},
-		{ 13, VGA_VMODE, "VGA 640x480p@60Hz        ",	GS_NONINTERLACED,	GS_MODE_VGA_640_60,	GS_FRAME, 	(u64)make_display_magic_number( 480, 1280,   0,   1,   54, 276), 0x004780000210000A},
-		{ 14, VGA_VMODE, "VGA 640x960i@60Hz        ",	GS_INTERLACED,		GS_MODE_VGA_640_60,	GS_FIELD,	(u64)make_display_magic_number( 960, 1280,   1,   1,  128, 291), 0x004F80000210000A}
+		{  0, SDTV_VMODE,"NTSC                             ",	GS_INTERLACED,		GS_MODE_NTSC,		GS_FIELD,	(u64)make_display_magic_number( 447, 2559,   0,   3,   46, 700), 0x00C7800601A01801},
+		{  1, SDTV_VMODE,"NTSC 'Non Interlaced'            ",	GS_INTERLACED,		GS_MODE_NTSC,		GS_FRAME,	(u64)make_display_magic_number( 223, 2559,   0,   3,   26, 700), 0x00C7800601A01802},
+		{  2, SDTV_VMODE,"PAL                              ",	GS_INTERLACED,		GS_MODE_PAL,		GS_FIELD,	(u64)make_display_magic_number( 511, 2559,   0,   3,   70, 720), 0x00A9000502101401},
+		{  3, SDTV_VMODE,"PAL 'Non Interlaced'             ",	GS_INTERLACED,		GS_MODE_PAL,		GS_FRAME,	(u64)make_display_magic_number( 255, 2559,   0,   3,   37, 720), 0x00A9000502101404},
+		{  4, SDTV_VMODE,"PAL @60Hz                        ",	GS_INTERLACED,		GS_MODE_PAL,		GS_FIELD,	(u64)make_display_magic_number( 447, 2559,   0,   3,   46, 700), 0x00C7800601A01801},
+		{  5, SDTV_VMODE,"PAL @60Hz 'Non Interlaced'       ",	GS_INTERLACED,		GS_MODE_PAL,		GS_FRAME,	(u64)make_display_magic_number( 223, 2559,   0,   3,   26, 700), 0x00C7800601A01802},
+		{  6, PS1_VMODE, "PS1 NTSC (HDTV 480p @60Hz)       ",	GS_NONINTERLACED,	GS_MODE_DTV_480P,	GS_FRAME,	(u64)make_display_magic_number( 255, 2559,   0,   1,   12, 736), 0x00C78C0001E00006},
+		{  7, PS1_VMODE, "PS1 PAL (HDTV 576p @50Hz)        ",	GS_NONINTERLACED,	GS_MODE_DTV_576P,	GS_FRAME,	(u64)make_display_magic_number( 255, 2559,   0,   1,   23, 756), 0x00A9000002700005},
+		{  8, HDTV_VMODE,"HDTV 480p @60Hz                  ",	GS_NONINTERLACED,	GS_MODE_DTV_480P,	GS_FRAME, 	(u64)make_display_magic_number( 479, 1279,   0,   1,   51, 308), 0x00C78C0001E00006},
+		{  9, HDTV_VMODE,"HDTV 576p @50Hz                  ",	GS_NONINTERLACED,	GS_MODE_DTV_576P,	GS_FRAME,	(u64)make_display_magic_number( 575, 1279,   0,   1,   64, 320), 0x00A9000002700005},
+		{ 10, HDTV_VMODE,"HDTV 720p @60Hz                  ",	GS_NONINTERLACED,	GS_MODE_DTV_720P,	GS_FRAME, 	(u64)make_display_magic_number( 719, 1279,   1,   1,   24, 302), 0x00AB400001400005},
+		{ 11, HDTV_VMODE,"HDTV 1080i @60Hz                 ",	GS_INTERLACED,		GS_MODE_DTV_1080I,	GS_FIELD, 	(u64)make_display_magic_number(1079, 1919,   1,   2,   48, 238), 0x0150E00201C00005},
+		{ 12, HDTV_VMODE,"HDTV 1080i @60Hz 'Non Interlaced'",	GS_INTERLACED,		GS_MODE_DTV_1080I,	GS_FRAME, 	(u64)make_display_magic_number(1079, 1919,   0,   2,   48, 238), 0x0150E00201C00005},
+		{ 13, VGA_VMODE, "VGA 640x480p @60Hz               ",	GS_NONINTERLACED,	GS_MODE_VGA_640_60,	GS_FRAME, 	(u64)make_display_magic_number( 479, 1279,   0,   1,   54, 276), 0x004780000210000A},
+		{ 14, VGA_VMODE, "VGA 640x960i @60Hz               ",	GS_INTERLACED,		GS_MODE_VGA_640_60,	GS_FIELD,	(u64)make_display_magic_number( 959, 1279,   1,   1,  128, 291), 0x004F80000210000A}
 
 	}; //ends predef_vmode definition
 
@@ -39,8 +49,13 @@ int main(void)
 	// predef_vmode_toggle -> Aux for pre-defined vmodes
 	//			999: None value chosen yet
 	// 			Other values: Value chosen by user
-	//int predef_vmode_toggle = 999;
-	int predef_vmode_toggle = 11;
+	int predef_vmode_toggle = 999;
+
+	//----------------------------------------------------------------------------
+
+	// X and Y axis offsets
+	int dx_offset = 0;
+	int dy_offset = 0;
 
 	//----------------------------------------------------------------------------
 
@@ -62,8 +77,7 @@ int main(void)
 
 	u32 exit_option_size = 	sizeof( exit_option ) / sizeof( exit_option[0] );
 
-//	int exit_option_toggle = 999;
-	int exit_option_toggle = 6;
+	int exit_option_toggle = 999;
 
 	//----------------------------------------------------------------------------
 
@@ -112,6 +126,11 @@ int main(void)
 	text_height = (26.0f * gsFontM->Spacing * 0.5f);
 	edge_size = text_height;
 
+	// The following two lines are useful for making doctorxyz's development and testing easier
+	// due to his console setup: PS2 Slim SCPH-90006HK (BIOS rev2.30) - Thunder Pro II Gold modchip
+	// predef_vmode_toggle = 11;
+	// exit_option_toggle = 6;
+
 	// Main loop
 outer_loop_restart:
 	while (!(updateflag == 0)) {//---------- Start of outer while loop ----------
@@ -125,7 +144,7 @@ outer_loop_restart:
 			syncv = predef_vmode[predef_vmode_toggle].syncv;
 			smode2 = (ffmd<<1)|interlace;
 
-			UpdateGSMParams(interlace, mode, ffmd, display, syncv, smode2);
+			UpdateGSMParams(interlace, mode, ffmd, display, syncv, smode2, dx_offset, dy_offset);
 
 		}//ends if
 			
@@ -145,23 +164,28 @@ outer_loop_restart:
 		gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, WhiteFont, FONTM_CROSS" PS1 SDTV (NTSC/PAL)");
 		rownumber++;
 		rownumber++;
-		gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, WhiteFont, "(SELECT] Exit Method");
-		rownumber++;
-		gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, WhiteFont, "(START] Exit");
+		gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, WhiteFont, "[DPAD] X and Y axis offsets");
 		rownumber++;
 		rownumber++;
+		gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, WhiteFont, "[SELECT] Exit Method");
+		rownumber++;
+		gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, WhiteFont, "[START] Exit");
+			rownumber++;
+			rownumber++;
 		if(predef_vmode_toggle != 999) {
-			gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, YellowFont, "GS Mode Selected:");
-			rownumber++;
-			gsKit_fontm_printf_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, YellowFont, "%s", predef_vmode[predef_vmode_toggle].description);
-			rownumber++;
+			gsKit_fontm_printf_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, YellowFont, "GS Mode Selected: %s", predef_vmode[predef_vmode_toggle].description);
 			rownumber++;
 		}
 		if(exit_option_toggle != 999) {
-			gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, YellowFont, "Exit Method Selected:");
+			gsKit_fontm_printf_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, YellowFont, "Exit Method Selected: %s", exit_option[exit_option_toggle].description);
 			rownumber++;
-			gsKit_fontm_printf_scaled(gsGlobal, gsFontM, edge_size, (rownumber)*11, 1, 0.4f, YellowFont,   "%s", exit_option[exit_option_toggle].description);
+		}
+		if(dx_offset != 0) {
+			gsKit_fontm_printf_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, YellowFont, "X-axis offset: %+d", dx_offset);
 			rownumber++;
+		}
+		if(dy_offset != 0) {
+			gsKit_fontm_printf_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, YellowFont, "Y-axis offset: %+d", dy_offset);
 			rownumber++;
 		}
 		Draw_Screen();
@@ -225,6 +249,26 @@ outer_loop_restart:
 			}
 			else if(retval == PAD_START)	{ //Exit GSM
 				updateflag = 0; //exit outer loop
+			}
+			else if((retval == PAD_LEFT))	{ //Decrease DX
+				dx_offset -= 4;
+				if(dx_offset < -(4096/4)) dx_offset += 4;
+				updateflag = 1; //exit inner loop
+			}
+			else if((retval == PAD_RIGHT))	{ //Increase DX
+				dx_offset += 4;
+				if(dx_offset > (4096/4)) dx_offset -= 4;
+				updateflag = 1; //exit inner loop
+			}
+			else if((retval == PAD_UP))	{ //Increase DY
+				dy_offset += 4;
+				if(dy_offset > (2048/4)) dy_offset -= 4;
+				updateflag = 1; //exit inner loop
+			}
+			else if((retval == PAD_DOWN))	{ //Decrease DY
+				dy_offset -= 4;
+				if(dy_offset < -(2048/4)) dy_offset += 4;
+				updateflag = 1; //exit inner loop
 			}
 			
 		}	//---------- End of inner while loop ----------
