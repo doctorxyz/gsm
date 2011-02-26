@@ -1,3 +1,13 @@
+/*
+#
+# Graphics Synthesizer Mode Selector (a.k.a. GSM) - Force (set and keep) a GS Mode, then load & exec a PS2 ELF
+#-------------------------------------------------------------------------------------------------------------
+# Copyright 2009, 2010, 2011 doctorxyz & dlanor
+# Licenced under Academic Free License version 2.0
+# Review LICENSE file for further details.
+#
+*/
+
 #include <syscallnr.h>
 
 #define _GSM_ENGINE_ __attribute__((section(".gsm_engine")))		// Resident section
@@ -33,7 +43,7 @@ extern volatile void GSHandler() _GSM_ENGINE_;
 /* Update GSM params */
 /*-------------------*/
 // Update parameters to be enforced by Hook_SetGsCrt syscall hook and GSHandler service routine functions
-void UpdateGSMParams(u32 interlace, u32 mode, u32 ffmd, u64 display, u64 syncv, u64 smode2)
+void UpdateGSMParams(u32 interlace, u32 mode, u32 ffmd, u64 display, u64 syncv, u64 smode2, int dx_offset, int dy_offset)
 {
 	DI();
 	ee_kmode_enter();
@@ -51,8 +61,8 @@ void UpdateGSMParams(u32 interlace, u32 mode, u32 ffmd, u64 display, u64 syncv, 
 	SMODE2_fix		= 0;	// SMODE2 Fix -----------> 0 = On, 1 = Off ; Default = 0 = On
 	SYNCV_fix		= 0;	// SYNCV Fix ------------> 0 = On, 1 = Off ; Default = 0 = On
 
-	X_offset		= 0;	// X-axis offset
-	Y_offset		= 0;	// Y-axis offset
+	X_offset		= dx_offset;	// X-axis offset -> Use it only when automatic adaptations formulas don't suffice
+	Y_offset		= dy_offset;	// Y-axis offset -> Use it only when automatic adaptations formulas don't suffice
 
 	__asm__ __volatile__(
 		"sync.l;"
@@ -112,9 +122,9 @@ void Install_GSHandler(void)
 
 /*
 	"li $a0, 0x12000000\n"	// Address base for trapping
-	"li $a1, 0x1FFFFE1F\n"	// Address mask for trapping	//DOCTORXYZ
-	//We trap writes to 0x12000000 + 0x00,0x20,0x40,0x60,0x80,0xA0,0xC0,0xE0,0x100,0x120,0x140,0x160,0x180,0x1A0,0x1C0,0x1E0	//DOCTORXYZ
-	//We only want 0x20, 0x60, 0x80, 0xA0, 0x100, but can't mask for that combination //DOCTORXYZ
+	"li $a1, 0x1FFFFF1F\n"	// Address mask for trapping
+	//We trap writes to 0x12000000 + 0x00,0x20,0x40,0x60,0x80,0xA0,0xC0,0xE0
+	//We only want 0x20, 0x60, 0x80, 0xA0, but can't mask for that combination
 	//But the trapping range is now extended to match all kernel access segments
 */
 
@@ -125,9 +135,9 @@ void Install_GSHandler(void)
 	".set noat\n"
 	
 	"li $a0, 0x12000000\n"	// Address base for trapping
-	"li $a1, 0x1FFFFF1F\n"	// Address mask for trapping
-	//We trap writes to 0x12000000 + 0x00,0x20,0x40,0x60,0x80,0xA0,0xC0,0xE0
-	//We only want 0x20, 0x60, 0x80, 0xA0, but can't mask for that combination
+	"li $a1, 0x1FFFFE1F\n"	// Address mask for trapping	//DOCTORXYZ
+	//We trap writes to 0x12000000 + 0x00,0x20,0x40,0x60,0x80,0xA0,0xC0,0xE0,0x100,0x120,0x140,0x160,0x180,0x1A0,0x1C0,0x1E0	//DOCTORXYZ
+	//We only want 0x20, 0x60, 0x80, 0xA0, 0x100, but can't mask for that combination //DOCTORXYZ
 	//But the trapping range is now extended to match all kernel access segments
 
 	"di\n"									// Disable Interupts
