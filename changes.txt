@@ -1,5 +1,8 @@
 GSModeSelector releases by doctorxyz and dlanor (at psx-scene)
 
+GSModeSelector v0.36b (2013.01.16) by doctorxyz
+- GUI can be bootable and relaunchable by FCMB E1 launch keys (due to DeInitGSM, New IOP reboot sequence, simplified Makefile, new Launcher based on uLE v4.42a, ...)
+
 GSModeSelector v0.36(2011.02.26) by doctorxyz and dlanor (compiled by doctorxyz)
 (This release was prepared by me having in mind both GSM standalone neeeded code improvements and future OPL integration)
 - Simplified OSD: buttons for video modes, SELECT for launch method, PAD for X and Y-axis offset and START to launch
