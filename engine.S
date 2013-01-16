@@ -21,7 +21,8 @@ GS_BGCOLOUR=GS_BASE+0x00E0
 .set push
 .set noreorder # disable assembler reorder mode, so the code will not be optimized or changed in any way, giving complete instruction order control to the programmer
 .set noat # disable assembler from using register $1 (known as the assembler temporary, or $at register) to hold intermediate values when performing macro expansions
-.set nomacro # warning if any statement expands to more than one machine instruction
+.set macro # disable warning if any statement expands to more than one machine instruction
+#.set nomacro # enable warning if any statement expands to more than one machine instruction
 
 #####################################################
 # .gsm_engine section
