@@ -3,100 +3,191 @@
 # Graphics Synthesizer Mode Selector (a.k.a. GSM) - Force (set and keep) a GS Mode, then load & exec a PS2 ELF
 #-------------------------------------------------------------------------------------------------------------
 # Copyright 2009, 2010, 2011 doctorxyz & dlanor
+# Copyright 2011, 2012 doctorxyz, SP193 & reprep
+# Copyright 2013 doctorxyz
 # Licenced under Academic Free License version 2.0
 # Review LICENSE file for further details.
 #
 */
 
-#define TITLE			"Graphics Synthesizer Mode Selector"
-#define VERSION			"0.36b (can be bootable and relaunchable by FCMB E1 launch keys)"
-#define AUTHORS			"doctorxyz and dlanor"
-
 #include <syscallnr.h>
+#include <stdio.h>
 #include <kernel.h>
+#include <malloc.h>
+#include <string.h>
 #include <debug.h>
 #include <sifrpc.h>
 #include <fileXio_rpc.h>
 #include <loadfile.h>
-#include <stdio.h>
 #include <sbv_patches.h>
 #include <iopcontrol.h>
-#include <malloc.h>
 #include <libmc.h>
 #include <fileio.h>
-#include <string.h>
 #include <libhdd.h>
 #include <libpad.h>
 
-#include <sys/fcntl.h>
-#include <sys/stat.h>
-#include <sys/ioctl.h>
+#include <gsKit.h>
 
 #include "timer.h"
 #include "pad.h"
 
-#include <gsKit.h>
+#define TITLE			"Graphics Synthesizer Mode Selector"
+#define VERSION			"0.37"
+#define AUTHORS			"doctorxyz, dlanor, SP193 and reprep"
 
-#include <libjpg.h>
+#define gsKit_fontm_printf_scaled(gsGlobal, gsFontM, X, Y, Z, scale, color, format, args...) \
+	sprintf(tempstr, format, args); \
+	gsKit_fontm_print_scaled(gsGlobal, gsFontM, X, Y, Z, scale, color, tempstr);
+	
+#define make_display_magic_number(dh, dw, magv, magh, dy, dx) \
+        (((u64)(dh)<<44) | ((u64)(dw)<<32) | ((u64)(magv)<<27) | \
+         ((u64)(magh)<<23) | ((u64)(dy)<<12)   | ((u64)(dx)<<0)     )
 
+// After doing some investigation, I''ve found these interesting FONTM character number codes ;-)
+#define FONTM_CIRCLE			"\f0090"
+#define FONTM_FILLED_CIRCLE		"\f0091"
+#define FONTM_SQUARE			"\f0095"
+#define FONTM_FILLED_SQUARE		"\f0096"
+#define FONTM_TRIANGLE			"\f0097"
+#define FONTM_FILLED_TRIANGLE	"\f0098"
+#define FONTM_CROSS				"\f1187"
+
+#define MAKE_J(func)		(u32)( (0x02 << 26) | (((u32)func) / 4) )	// Jump (MIPS instruction)
+#define NOP					0x00000000									// No Operation (MIPS instruction)
+
+// GS Registers
+#define GS_BGCOLOUR *((volatile unsigned long int*)0x120000E0)
+
+// VMODE TYPES
+#define PS1_VMODE	1
+#define SDTV_VMODE	2
+#define HDTV_VMODE	3
+#define VGA_VMODE	4
+
+/// DTV 576 Progressive Scan (720x576)
+#define GS_MODE_DTV_576P  0x53
+
+/// DTV 1080 Progressive Scan (1920x1080)
+#define GS_MODE_DTV_1080P  0x54
+
+// Prototypes for External Functions
 #define _GSM_ENGINE_ __attribute__((section(".gsm_engine")))		// Resident section
 
 extern void *Old_SetGsCrt _GSM_ENGINE_;
 
-extern volatile u32 Source_INTERLACE _GSM_ENGINE_;
-extern volatile u32 Source_MODE _GSM_ENGINE_;
-extern volatile u32 Source_FFMD _GSM_ENGINE_;
+extern u32 Source_INTERLACE _GSM_ENGINE_;
+extern u32 Source_MODE _GSM_ENGINE_;
+extern u32 Source_FFMD _GSM_ENGINE_;
 
-extern volatile u64 Calculated_DISPLAY _GSM_ENGINE_;
+extern u64 Calculated_DISPLAY _GSM_ENGINE_;
 
-extern volatile u32 Target_INTERLACE _GSM_ENGINE_;
-extern volatile u32 Target_MODE _GSM_ENGINE_;
-extern volatile u32 Target_FFMD _GSM_ENGINE_;
+extern u32 Target_INTERLACE _GSM_ENGINE_;
+extern u32 Target_MODE _GSM_ENGINE_;
+extern u32 Target_FFMD _GSM_ENGINE_;
 
-extern volatile u64 Target_SMODE2 _GSM_ENGINE_;
-extern volatile u64 Target_DISPLAY _GSM_ENGINE_;
-extern volatile u64 Target_SYNCV _GSM_ENGINE_;
+extern u64 Target_SMODE2 _GSM_ENGINE_;
+extern u64 Target_DISPLAY _GSM_ENGINE_;
+extern u64 Target_SYNCV _GSM_ENGINE_;
 
-extern volatile u8 automatic_adaptation _GSM_ENGINE_;
-extern volatile u8 DISPLAY_fix _GSM_ENGINE_;
-extern volatile u8 SMODE2_fix _GSM_ENGINE_;
-extern volatile u8 SYNCV_fix _GSM_ENGINE_;
+extern u8 automatic_adaptation _GSM_ENGINE_;
+extern u8 DISPLAY_fix _GSM_ENGINE_;
+extern u8 SMODE2_fix _GSM_ENGINE_;
+extern u8 SYNCV_fix _GSM_ENGINE_;
+extern u8 skip_videos_fix _GSM_ENGINE_;
 
-extern volatile u32 X_offset _GSM_ENGINE_;
-extern volatile u32 Y_offset _GSM_ENGINE_;
+extern u32 X_offset _GSM_ENGINE_;
+extern u32 Y_offset _GSM_ENGINE_;
 
-extern volatile void Hook_SetGsCrt() _GSM_ENGINE_;
-extern volatile void GSHandler() _GSM_ENGINE_;
+extern void Hook_SetGsCrt() _GSM_ENGINE_;
+extern void GSHandler() _GSM_ENGINE_;
 
-int	patcher_enabled = 0;
+extern void RunLoaderElf(char *filename, char *);
 
-// SetGsCrt params
-volatile u32 interlace, mode, ffmd;
-
-// GS Registers
-#define GS_BGCOLOUR *((volatile unsigned long int*)0x120000E0)
-volatile u64 display, syncv, act_syncv, smode2;
-
-// DisplayX GS Registers' Bit Fields
-//RA/doctorxyz NB: Into GSM and gsKit, gs_dw and gs_dh are 1 unit higher than the real GS register values
-//RA NB: so for a 480p resolution we use 480, though the register gets 479
-volatile u32 gs_dx, gs_dy, gs_magh, gs_magv, gs_dw, gs_dh;
-
-typedef struct gsm_vmode {
-	u32	interlace;
-	u32	mode;
-	u32	field;
+typedef struct predef_vmode_struct {
+	u8	category;
+	char desc[34];
+	u8	interlace;
+	u8	mode;
+	u8	ffmd;
 	u64	display;
 	u64	syncv;
-	u64	smode2;
-} GSM_vmode;
+} predef_vmode_struct;
 
-typedef struct gsm_exit_option {
-	u8	id;
-	char description[12];
+typedef struct off_on_struct {
+	char desc[4];
+	u8	value;
+} off_on_struct __attribute__((aligned(16)));
+
+typedef struct exit_struct {
+	char desc[22];
 	char elf_path[0x40];
-} GSM_exit_option;
+} exit_struct;
 
+// Pre-defined vmodes 
+// Some of following vmodes gives BOSD and/or freezing, depending on the console BIOS version, TV/Monitor set, PS2 cable (composite, component, VGA, ...)
+// Therefore there are many variables involved here that can lead us to success or faild depending on the circumstances above mentioned.
+//
+//	category	description								interlace			mode			 	ffmd	   	display							dh		dw		magv	magh	dy		dx		syncv
+//	--------	-----------								---------			----			 	----		----------------------------	--		--		----	----	--		--		-----
+static const predef_vmode_struct predef_vmode[30] = {
+	{  SDTV_VMODE,"NTSC                           ",	GS_INTERLACED,		GS_MODE_NTSC,		GS_FIELD,	(u64)make_display_magic_number(	 447,	2559,	0,		3,		 46,	700),	0x00C7800601A01801},
+	{  SDTV_VMODE,"NTSC Non Interlaced            ",	GS_INTERLACED,		GS_MODE_NTSC,		GS_FRAME,	(u64)make_display_magic_number(	 223,	2559,	0,		3,		 26,	700),	0x00C7800601A01802},
+	{  SDTV_VMODE,"PAL                            ",	GS_INTERLACED,		GS_MODE_PAL,		GS_FIELD,	(u64)make_display_magic_number(	 511,	2559,	0,		3,		 70,	720),	0x00A9000502101401},
+	{  SDTV_VMODE,"PAL Non Interlaced             ",	GS_INTERLACED,		GS_MODE_PAL,		GS_FRAME,	(u64)make_display_magic_number(	 255,	2559,	0,		3,		 37,	720),	0x00A9000502101404},
+	{  SDTV_VMODE,"PAL @60Hz                      ",	GS_INTERLACED,		GS_MODE_PAL,		GS_FIELD,	(u64)make_display_magic_number(	 447,	2559,	0,		3,		 46,	700),	0x00C7800601A01801},
+	{  SDTV_VMODE,"PAL @60Hz Non Interlaced       ",	GS_INTERLACED,		GS_MODE_PAL,		GS_FRAME,	(u64)make_display_magic_number(	 223,	2559,	0,		3,		 26,	700),	0x00C7800601A01802},
+	{  PS1_VMODE, "PS1 NTSC (HDTV 480p @60Hz)     ",	GS_NONINTERLACED,	GS_MODE_DTV_480P,	GS_FRAME,	(u64)make_display_magic_number(	 255,	2559,	0,		1,		 12,	736),	0x00C78C0001E00006},
+	{  PS1_VMODE, "PS1 PAL (HDTV 576p @50Hz)      ",	GS_NONINTERLACED,	GS_MODE_DTV_576P,	GS_FRAME,	(u64)make_display_magic_number(	 255,	2559,	0,		1,		 23,	756),	0x00A9000002700005},
+	{  HDTV_VMODE,"HDTV 480p @60Hz                ",	GS_NONINTERLACED,	GS_MODE_DTV_480P,	GS_FRAME, 	(u64)make_display_magic_number(	 479,	1279,	0,		1,		 51,	308),	0x00C78C0001E00006},
+	{  HDTV_VMODE,"HDTV 576p @50Hz                ",	GS_NONINTERLACED,	GS_MODE_DTV_576P,	GS_FRAME,	(u64)make_display_magic_number(	 575,	1279,	0,		1,		 64,	320),	0x00A9000002700005},
+	{  HDTV_VMODE,"HDTV 720p @60Hz                ",	GS_NONINTERLACED,	GS_MODE_DTV_720P,	GS_FRAME, 	(u64)make_display_magic_number(	 719,	1279,	1,		1,		 24,	302),	0x00AB400001400005},
+	{  HDTV_VMODE,"HDTV 1080i @60Hz               ",	GS_INTERLACED,		GS_MODE_DTV_1080I,	GS_FIELD, 	(u64)make_display_magic_number(	1079,	1919,	1,		2,		 48,	238),	0x0150E00201C00005},
+	{  HDTV_VMODE,"HDTV 1080i @60Hz Non Interlaced",	GS_INTERLACED,		GS_MODE_DTV_1080I,	GS_FRAME, 	(u64)make_display_magic_number(	1079,	1919,	0,		2,		 48,	238),	0x0150E00201C00005},
+	{  HDTV_VMODE,"HDTV 1080p @60Hz               ",	GS_NONINTERLACED,	GS_MODE_DTV_1080P,	GS_FRAME, 	(u64)make_display_magic_number(	1079,	1919,	1,		2,		 48,	238),	0x0150E00201C00005},
+	{  VGA_VMODE, "VGA 640x480p @60Hz             ",	GS_NONINTERLACED,	GS_MODE_VGA_640_60,	GS_FRAME, 	(u64)make_display_magic_number(	 479,	1279,	0,		1,		 54,	276),	0x004780000210000A},
+	{  VGA_VMODE, "VGA 640x960i @60Hz             ",	GS_INTERLACED,		GS_MODE_VGA_640_60,	GS_FIELD,	(u64)make_display_magic_number(	 959,	1279,	1,		1,		128,	291),	0x004F80000210000A},
+	{  VGA_VMODE, "VGA 640x480p @72Hz             ",	GS_NONINTERLACED,	GS_MODE_VGA_640_72, GS_FRAME,	(u64)make_display_magic_number(  480,	1280,	0,		1,		 18,	330),	0x0067800001C00009},
+	{  VGA_VMODE, "VGA 640x480p @75Hz             ",	GS_NONINTERLACED,	GS_MODE_VGA_640_75, GS_FRAME, 	(u64)make_display_magic_number(  480,	1280,	0,		1,		 18,	360),	0x0067800001000001},
+	{  VGA_VMODE, "VGA 640x480p @85Hz             ",	GS_NONINTERLACED,	GS_MODE_VGA_640_85, GS_FRAME,	(u64)make_display_magic_number(  480,	1280,	0,		1,		 18,	260),	0x0067800001000001},
+	{  VGA_VMODE, "VGA 800x600p @56Hz             ",	GS_NONINTERLACED,	GS_MODE_VGA_800_56, GS_FRAME,	(u64)make_display_magic_number(  600,	1600,	0,		1,		 25,	450),	0x0049600001600001},
+	{  VGA_VMODE, "VGA 800x600p @60Hz             ",	GS_NONINTERLACED,	GS_MODE_VGA_800_60, GS_FRAME, 	(u64)make_display_magic_number(  600,	1600,	0,		1,		 25,	465),	0x0089600001700001},
+	{  VGA_VMODE, "VGA 800x600p @72Hz             ",	GS_NONINTERLACED,	GS_MODE_VGA_800_72, GS_FRAME,	(u64)make_display_magic_number(  600,	1600,	0,		1,		 25,	465),	0x00C9600001700025},
+	{  VGA_VMODE, "VGA 800x600p @75Hz             ",	GS_NONINTERLACED,	GS_MODE_VGA_800_75, GS_FRAME, 	(u64)make_display_magic_number(  600,	1600,	0,		1,		 25,	510),	0x0069600001500001},
+	{  VGA_VMODE, "VGA 800x600p @85Hz             ",	GS_NONINTERLACED,	GS_MODE_VGA_800_85, GS_FRAME,	(u64)make_display_magic_number(  600,	1600,	0,		1,		 15,	500),	0x0069600001B00001},
+	{  VGA_VMODE, "VGA 1024x768p @60Hz            ",	GS_NONINTERLACED,	GS_MODE_VGA_1024_60, GS_FRAME, 	(u64)make_display_magic_number(  768,	2048,	0,		2,		 30,	580),	0x00CC000001D00003},
+	{  VGA_VMODE, "VGA 1024x768p @70Hz            ",	GS_NONINTERLACED,	GS_MODE_VGA_1024_70, GS_FRAME,	(u64)make_display_magic_number(  768,	1024,	0,		0,		 30,	266),	0x00CC000001D00003},
+	{  VGA_VMODE, "VGA 1024x768p @75Hz            ",	GS_NONINTERLACED,	GS_MODE_VGA_1024_75, GS_FRAME, 	(u64)make_display_magic_number(  768,	1024,	0,		0,		 30,	260),	0x006C000001C00001},
+	{  VGA_VMODE, "VGA 1024x768p @85Hz            ",	GS_NONINTERLACED,	GS_MODE_VGA_1024_85, GS_FRAME,	(u64)make_display_magic_number(  768,	1024,	0,		0,		 30,	290),	0x006C000002400001},
+	{  VGA_VMODE, "VGA 1280x1024p @60Hz           ",	GS_NONINTERLACED,	GS_MODE_VGA_1280_60, GS_FRAME, 	(u64)make_display_magic_number(  1024,	1280,	1,		1,		 40,	350),	0x0070000002600001},
+	{  VGA_VMODE, "VGA 1280x1024p @75Hz           ",	GS_NONINTERLACED,	GS_MODE_VGA_1280_75, GS_FRAME, 	(u64)make_display_magic_number(  1024,	1280,	1,		1,		 40,	350),	0x0070000002600001}
+}; //ends predef_vmode definition
+
+u32 predef_vmode_size = 	sizeof( predef_vmode ) / sizeof( predef_vmode[0] );
+
+// Skip Videos fix
+//
+//	description	flag
+//	----------- ----
+volatile static off_on_struct off_on[2] = {
+	{ "OFF", 	0},
+	{ "ON ", 	1}
+};//ends skip_videos definition
+
+u32 off_on_size = 	sizeof( off_on ) / sizeof( off_on[0] );
+
+// Exit Method
+//-
+//	description			elf_path
+//	-----------			---------
+volatile static exit_struct exit_option[5] = {
+	{ "PS2 BROWSER          ",	""},
+	{ "mc0:BOOT/BOOT.ELF    ",	"mc0:BOOT/BOOT.ELF\0"},
+	{ "mc0:APPS/BOOT.ELF    ",	"mc0:APPS/BOOT.ELF\0"},
+	{ "mc0:BOOT/HDLOADER.ELF",	"mc0:BOOT/HDLOADER.ELF\0"},
+	{ "mc0:boot/boot.elf    ",	"mc0:boot/boot.elf\0"},
+};//ends exit_option definition
+
+u32 exit_option_size = 	sizeof( exit_option ) / sizeof( exit_option[0] );
 
 // gsKit Color vars
 // Object Creation Macro for RGBAQ Color Values
@@ -137,16 +228,11 @@ u32 WhiteTrans = GS_SETREG_RGBAQ(0xEB,0xEB,0xEB,0x50,0x00);
 // gsGlobal is required for all painting functiions of gsKit.
 GSGLOBAL *gsGlobal;
 
-int gskit_vmode;
-
 // Font used for printing text.
 GSFONTM *gsFontM;
 
-
 //  Splash Screen Texture Skin
 GSTEXTURE TexSkin;
-
-
 
 int updateScr_1;     //flags screen updates for drawScr()
 int updateScr_2;     //used for anti-flicker delay in drawScr()
@@ -154,57 +240,13 @@ u64 updateScr_t = 0; //exit time of last drawScr()
 
 u64 WaitTime = 0; //used for time waiting
 
-/// DTV 576 Progressive Scan (720x576)
-#define GS_MODE_DTV_576P  0x53
-
-typedef struct gsm_predef_vmode {
-	u8	id;
-	u8	category;
-	char description[34];
-	u8	interlace;
-	u8	mode;
-	u8	ffmd;
-	u64	display;
-	u64	syncv;
-} GSM_predef_vmode;
-
 struct gsm_settings *GSM = NULL;
-
-// Prototypes for External Functions
-void RunLoaderElf(char *filename, char *);
-
-//Variadic macro by doctorxyz
-#define gsKit_fontm_printf_scaled(gsGlobal, gsFontM, X, Y, Z, scale, color, format, args...) \
-	sprintf(tempstr, format, args); \
-	gsKit_fontm_print_scaled(gsGlobal, gsFontM, X, Y, Z, scale, color, tempstr);
-	
-#define make_display_magic_number(dh, dw, magv, magh, dy, dx) \
-        (((u64)(dh)<<44) | ((u64)(dw)<<32) | ((u64)(magv)<<27) | \
-         ((u64)(magh)<<23) | ((u64)(dy)<<12)   | ((u64)(dx)<<0)     )
-
-// After some investigation, I found this interesting FONTM character number codes ;-)
-#define FONTM_CIRCLE			"\f0090"
-#define FONTM_FILLED_CIRCLE		"\f0091"
-#define FONTM_SQUARE			"\f0095"
-#define FONTM_FILLED_SQUARE		"\f0096"
-#define FONTM_TRIANGLE			"\f0097"
-#define FONTM_FILLED_TRIANGLE	"\f0098"
-#define FONTM_CROSS				"\f1187"
-
-// VMODE TYPES
-#define PS1_VMODE	1
-#define SDTV_VMODE	2
-#define HDTV_VMODE	3
-#define VGA_VMODE	4
-	
-#define MAKE_J(func)		(u32)( (0x02 << 26) | (((u32)func) / 4) )	// Jump (MIPS instruction)
-#define NOP					0x00000000									// No Operation (MIPS instruction)
 
 /*-------------------*/
 /* Update GSM params */
 /*-------------------*/
 // Update parameters to be enforced by Hook_SetGsCrt syscall hook and GSHandler service routine functions
-void UpdateGSMParams(u32 interlace, u32 mode, u32 ffmd, u64 display, u64 syncv, u64 smode2, int dx_offset, int dy_offset)
+static inline void UpdateGSMParams(u32 interlace, u32 mode, u32 ffmd, u64 display, u64 syncv, u64 smode2, int dx_offset, int dy_offset, u8 skip_videos)
 {
 	DI();
 	ee_kmode_enter();
@@ -217,18 +259,15 @@ void UpdateGSMParams(u32 interlace, u32 mode, u32 ffmd, u64 display, u64 syncv, 
 	Target_DISPLAY 		= (u64) display;
 	Target_SYNCV 		= (u64) syncv;
 
-	automatic_adaptation	= 0;	// Automatic Adaptation -> 0 = On, 1 = Off ; Default = 0 = On
-	DISPLAY_fix		= 0;	// DISPLAYx Fix ---------> 0 = On, 1 = Off ; Default = 0 = On
-	SMODE2_fix		= 0;	// SMODE2 Fix -----------> 0 = On, 1 = Off ; Default = 0 = On
-	SYNCV_fix		= 0;	// SYNCV Fix ------------> 0 = On, 1 = Off ; Default = 0 = On
+	automatic_adaptation	= 0;		// Automatic Adaptation -> 0 = On, 1 = Off ; Default = 0 = On
+	DISPLAY_fix			= 0;			// DISPLAYx Fix ---------> 0 = On, 1 = Off ; Default = 0 = On
+	SMODE2_fix			= 0;			// SMODE2 Fix -----------> 0 = On, 1 = Off ; Default = 0 = On
+	SYNCV_fix			= 0;			// SYNCV Fix ------------> 0 = On, 1 = Off ; Default = 0 = On
 
-	X_offset		= dx_offset;	// X-axis offset -> Use it only when automatic adaptations formulas don't suffice
-	Y_offset		= dy_offset;	// Y-axis offset -> Use it only when automatic adaptations formulas don't suffice
+	X_offset			= dx_offset;	// X-axis offset -> Use it only when automatic adaptations formulas don't fit into your needs
+	Y_offset			= dy_offset;	// Y-axis offset -> Use it only when automatic adaptations formulas dont't fit into your needs
 
-	__asm__ __volatile__(
-		"sync.l;"
-		"sync.p;"
-	);
+	skip_videos_fix		= skip_videos ^ 1;	// Skip Videos Fix ------------> 0 = On, 1 = Off ; Default = 0 = On
 
 	ee_kmode_exit();
 	EI();
@@ -239,7 +278,6 @@ void UpdateGSMParams(u32 interlace, u32 mode, u32 ffmd, u64 display, u64 syncv, 
 /*---------------------------------------------------------*/
 static inline void DeInitGSM(void)
 {
-	#define GS_BGCOLOUR *((volatile unsigned long int*)0x120000E0)
 	//Search for Syscall Table in ROM
 	u32 i;
 	u32 KernelStart;
@@ -285,28 +323,6 @@ static inline void DeInitGSM(void)
 	EI();
 }
 
-/*--------------------------*/
-/* Call sceSetGsCrt syscall */
-/*--------------------------*/
-
-void gs_setmode(int Interlace, int Mode, int FFMD)
-{
-
-	__asm__ __volatile__(
-		"li  $3, 0x02      \n"   // Specify the sceSetGsCrt syscall. (reg 3)
-		// Specify the 3 arguments (regs 4 - 6)
-		"add $4, $0, %0    \n"   // Interlace
-		"add $5, $0, %1    \n"   // Mode
-		"add $6, $0, %2    \n"   // FFMD
-
-		"syscall           \n"   // Perform the syscall
-		"nop               \n"   //
-
-		:
-		: "r" (Interlace), "r" (Mode), "r" (FFMD)
-	);
-  }
-
 //----------------------------------------------------------------------------
 void delay(int count)
 {
@@ -318,15 +334,14 @@ void delay(int count)
 	}
 }
 
-//----------------------------------------------------------------------------
 void Timer_delay(int timeout){ //Will delay at least timeout ms (at most 1 more)
 	u64 start_time;
 
 	start_time = Timer();
 	while(Timer() < (start_time + (u64) (timeout + 1)));
-} //ends Timer_delay
-//----------------------------------------------------------------------------
-void	CleanUp(void)
+}
+
+void CleanUp(void)
 {
 	TimerEnd();
 	padPortClose(1,0);
@@ -334,32 +349,17 @@ void	CleanUp(void)
 	padEnd();
 }
 
-//------------------------------------------------------------------------------------------------------------------------
-// Clear_Screen - Taken from the fmcb1.7 sources
-//------------------------------------------------------------------------------------------------------------------------
 void Clear_Screen(void)
 {
-
 	gsKit_clear(gsGlobal, Black);
 	gsKit_prim_sprite_texture(gsGlobal,
 	 &TexSkin, 0, 0, 0, 0,
 	 gsGlobal->Width, gsGlobal->Height, TexSkin.Width, TexSkin.Height,
 	 0, Trans);
-	 
-	//gsKit_prim_sprite(gsGlobal, 0, 0, gsGlobal->Width, gsGlobal->Heigth, 0, Trans);
-
 }
-//endfunc Clear_Screen
-//------------------------------------------------------------------------------------------------------------------------
 
-//----------------------------------------------------------------------------
-// Setup_GS - Took and Adopted from the fmcb1.7, mcboot1.5 and HD_ProjectV1.07 sources
-// I got it from Compilable PS2 source collection
-// by Lazy Bastard from GHSI (http://www.gshi.org/vb/showthread.php?t=3098)
-//----------------------------------------------------------------------------
 void Setup_GS()
 {
-
 	// GS Init
 
 	//The following line eliminates overflow
@@ -379,32 +379,6 @@ void Setup_GS()
 	} else {
 		gsGlobal->Height = 512;
 	}
-	if(mode == GS_MODE_VGA_640_60) {
-		gsGlobal->Mode = GS_MODE_VGA_640_60;
-		gsGlobal->Height = 480;
-	}
-
-	// In order to have proper displaying on GSM OSD (always showed after enabling the patcher),
-	// we must handle these params to avoid showing beyond the current framebuffer limits,
-	// that would result on wrong sized display (doubled rows, and garbage at the bottom, etc.)
-	if(patcher_enabled == 1) {
-		gsGlobal->Mode = mode;
-		gsGlobal->Interlace = interlace;
-		gsGlobal->Field = ffmd;
-		//gsGlobal->Height = (gs_dh / (gs_magv+1)); 
-		//Trying to solve GSM OSD gsKit issues, using the example "basic.c - Example demonstrating basic gsKit operation"
-		if(mode == GS_MODE_DTV_1080I) {
-			gsGlobal->Height = 540;
-			gsGlobal->PSM = GS_PSM_CT16;
-			gsGlobal->PSMZ = GS_PSMZ_16;
-			gsGlobal->Dithering = GS_SETTING_ON;
-		}
-		if(mode == GS_MODE_DTV_720P) {
-			gsGlobal->Height = 360;
-			gsGlobal->PSM = GS_PSM_CT16;
-			gsGlobal->PSMZ = GS_PSMZ_16;
-		}
-	}
 
 	// Screen Init - Here remaining gsGlobal params are setted to the defaults, based on these ones:
 	// gsGlobal->Interlace
@@ -421,15 +395,7 @@ void Setup_GS()
 	gsGlobal->PrimAlphaEnable = GS_SETTING_ON;
 
 }
-//----------------------------------------------------------------------------
-//endfunc Setup_GS
-//----------------------------------------------------------------------------
 
-//----------------------------------------------------------------------------
-// Draw_Screen - Taken from the fmcb1.7, mcboot1.5 and HD_ProjectV1.07 sources
-// I got it from Compilable PS2 source collection
-// by Lazy Bastard from GHSI (http://www.gshi.org/vb/showthread.php?t=3098)
-//----------------------------------------------------------------------------
 void Draw_Screen(void)
 {
 	if(updateScr_2){            //Did we render anything last time
@@ -441,12 +407,7 @@ void Draw_Screen(void)
 	updateScr_2 = updateScr_1;  //Note if this rendering had expected updates
 	updateScr_1 = 0;            //Note that we've nothing expected for next time
 } //NB: Apparently the GS keeps rendering while we continue with other work
-//----------------------------------------------------------------------------
-//endfunc Draw_Screen
-//----------------------------------------------------------------------------
 
-//----------------------------------------------------------------------------
-/* Loads SIO2MAN, MCMAN, MCSERV and PADMAN modules */
 void LoadModules(void)
 {
 	int id;
@@ -472,6 +433,54 @@ void LoadModules(void)
 	}
 }
 
+void InitGSM(unsigned int predef_vmode_idx, int XOffset, int YOffset, u8 skip_videos_idx)
+{
+	UpdateGSMParams(predef_vmode[predef_vmode_idx].interlace, \
+					predef_vmode[predef_vmode_idx].mode, \
+					predef_vmode[predef_vmode_idx].ffmd, \
+					predef_vmode[predef_vmode_idx].display, \
+					predef_vmode[predef_vmode_idx].syncv, \
+					((predef_vmode[predef_vmode_idx].ffmd)<<1)|(predef_vmode[predef_vmode_idx].interlace), \
+					XOffset, \
+					YOffset, \
+					skip_videos_idx);
+
+	/*-------------------------------------------------------*/
+	/* Install and Enable Graphics Synthesizer Mode Selector */
+	/*-------------------------------------------------------*/
+
+	/*----------------------------*/
+	/* Replace SetGsCrt in kernel */
+	/*----------------------------*/
+	if(GetSyscallHandler(__NR_SetGsCrt) != &Hook_SetGsCrt) {
+		Old_SetGsCrt = GetSyscallHandler(__NR_SetGsCrt);
+		SetSyscall(__NR_SetGsCrt, &Hook_SetGsCrt);
+	}
+
+	/*----------------------------------------------------------------------------------------------------*/
+	/* Replace Core Debug Exception Handler (V_DEBUG handler) in kernel                                   */
+	/* Exception Vector Address for Debug Level 2 Exception when Stadus.DEV bit is 0 (normal): 0x80000100 */
+	/* 'Level 2' is a generalization of Error Level (from previous MIPS processors)                       */
+	/* When this exception is recognized, control is transferred to the applicable service routine;       */
+	/* in our case the service routine is 'GSHandler'!                                                    */
+	/*----------------------------------------------------------------------------------------------------*/
+	__asm__ __volatile__ (
+	".set noreorder\n"
+	".set noat\n"
+
+	"sync.l\n"
+	"sync.p\n"
+	
+	".set at\n"
+	".set reorder\n"
+	);
+	DI();
+	ee_kmode_enter();
+	*(u32 *)0x80000100 = MAKE_J((int)GSHandler);
+	*(u32 *)0x80000104 = 0;
+	ee_kmode_exit();
+	EI();
+}
 
 int main(void)
 {   
@@ -484,74 +493,19 @@ int main(void)
 	int edge_size = 0;  //Used for screen rectangle drawing
 	int text_height = 0; //Used for text rows
  
-	// Pre-defined vmodes 
-	// Some of following vmodes gives BOSD and/or freezing, depending on the console BIOS version, TV/Monitor set, PS2 cable (composite, component, VGA, ...)
-	// Therefore there are many variables involved here that can lead us to success or faild depending on the circumstances above mentioned.
-	//
-	//	id	category	description		interlace		mode			 ffmd	   display                         dh   dw     magv magh dy  dx    syncv
-	//	--	--------	-----------		---------		----			 -----	   ----------------------------    --   --     ---- ---- --  --    ------------------
-	volatile static GSM_predef_vmode predef_vmode[15] = {
-
-		{  0, SDTV_VMODE,"NTSC                             ",	GS_INTERLACED,		GS_MODE_NTSC,		GS_FIELD,	(u64)make_display_magic_number( 447, 2559,   0,   3,   46, 700), 0x00C7800601A01801},
-		{  1, SDTV_VMODE,"NTSC 'Non Interlaced'            ",	GS_INTERLACED,		GS_MODE_NTSC,		GS_FRAME,	(u64)make_display_magic_number( 223, 2559,   0,   3,   26, 700), 0x00C7800601A01802},
-		{  2, SDTV_VMODE,"PAL                              ",	GS_INTERLACED,		GS_MODE_PAL,		GS_FIELD,	(u64)make_display_magic_number( 511, 2559,   0,   3,   70, 720), 0x00A9000502101401},
-		{  3, SDTV_VMODE,"PAL 'Non Interlaced'             ",	GS_INTERLACED,		GS_MODE_PAL,		GS_FRAME,	(u64)make_display_magic_number( 255, 2559,   0,   3,   37, 720), 0x00A9000502101404},
-		{  4, SDTV_VMODE,"PAL @60Hz                        ",	GS_INTERLACED,		GS_MODE_PAL,		GS_FIELD,	(u64)make_display_magic_number( 447, 2559,   0,   3,   46, 700), 0x00C7800601A01801},
-		{  5, SDTV_VMODE,"PAL @60Hz 'Non Interlaced'       ",	GS_INTERLACED,		GS_MODE_PAL,		GS_FRAME,	(u64)make_display_magic_number( 223, 2559,   0,   3,   26, 700), 0x00C7800601A01802},
-		{  6, PS1_VMODE, "PS1 NTSC (HDTV 480p @60Hz)       ",	GS_NONINTERLACED,	GS_MODE_DTV_480P,	GS_FRAME,	(u64)make_display_magic_number( 255, 2559,   0,   1,   12, 736), 0x00C78C0001E00006},
-		{  7, PS1_VMODE, "PS1 PAL (HDTV 576p @50Hz)        ",	GS_NONINTERLACED,	GS_MODE_DTV_576P,	GS_FRAME,	(u64)make_display_magic_number( 255, 2559,   0,   1,   23, 756), 0x00A9000002700005},
-		{  8, HDTV_VMODE,"HDTV 480p @60Hz                  ",	GS_NONINTERLACED,	GS_MODE_DTV_480P,	GS_FRAME, 	(u64)make_display_magic_number( 479, 1279,   0,   1,   51, 308), 0x00C78C0001E00006},
-		{  9, HDTV_VMODE,"HDTV 576p @50Hz                  ",	GS_NONINTERLACED,	GS_MODE_DTV_576P,	GS_FRAME,	(u64)make_display_magic_number( 575, 1279,   0,   1,   64, 320), 0x00A9000002700005},
-		{ 10, HDTV_VMODE,"HDTV 720p @60Hz                  ",	GS_NONINTERLACED,	GS_MODE_DTV_720P,	GS_FRAME, 	(u64)make_display_magic_number( 719, 1279,   1,   1,   24, 302), 0x00AB400001400005},
-		{ 11, HDTV_VMODE,"HDTV 1080i @60Hz                 ",	GS_INTERLACED,		GS_MODE_DTV_1080I,	GS_FIELD, 	(u64)make_display_magic_number(1079, 1919,   1,   2,   48, 238), 0x0150E00201C00005},
-		{ 12, HDTV_VMODE,"HDTV 1080i @60Hz 'Non Interlaced'",	GS_INTERLACED,		GS_MODE_DTV_1080I,	GS_FRAME, 	(u64)make_display_magic_number(1079, 1919,   0,   2,   48, 238), 0x0150E00201C00005},
-		{ 13, VGA_VMODE, "VGA 640x480p @60Hz               ",	GS_NONINTERLACED,	GS_MODE_VGA_640_60,	GS_FRAME, 	(u64)make_display_magic_number( 479, 1279,   0,   1,   54, 276), 0x004780000210000A},
-		{ 14, VGA_VMODE, "VGA 640x960i @60Hz               ",	GS_INTERLACED,		GS_MODE_VGA_640_60,	GS_FIELD,	(u64)make_display_magic_number( 959, 1279,   1,   1,  128, 291), 0x004F80000210000A}
-
-	}; //ends predef_vmode definition
-
-	u32 predef_vmode_size = 	sizeof( predef_vmode ) / sizeof( predef_vmode[0] );
-
-	// predef_vmode_toggle -> Aux for pre-defined vmodes
-	//			999: None value chosen yet
-	// 			Other values: Value chosen by user
-	int predef_vmode_toggle = 999;
+	// 999: None value chosen yet
+	// Other values: Value chosen by user
+	int predef_vmode_idx = 999;
+	int XOffset = 0;
+	int YOffset = 0;
+	int skip_videos_idx = 0;
+	int exit_option_idx = 999;
 
 	//----------------------------------------------------------------------------
 
-	// X and Y axis offsets
-	int dx_offset = 0;
-	int dy_offset = 0;
-
-	//----------------------------------------------------------------------------
-
-	// Exit Method
-	//-
-	//	id	description		path
-	//	--	-----------		--------
- 	volatile static GSM_exit_option exit_option[9] = {
-		{ 0, "PS2 BROWSER", "PS2 BROWSER"},
-		{ 1, "DEV1 BOOT  ", "mc0:BOOT/BOOT.ELF\0"},
-		{ 2, "DEV1 BOOT  ", "mc0:APPS/BOOT.ELF\0"},
-		{ 3, "HDLoader   ", "mc0:BOOT/HDLOADER.ELF\0"},
-		{ 4, "PS2LINK    ", "mc0:BWLINUX/PS2LINK.ELF\0"},
-		{ 5, "DEV1 boot  ", "mc0:boot/boot.elf\0"},
-		{ 6, "DEV1 boot1 ", "mc0:boot/boot1.elf\0"},
-		{ 7, "DEV1 boot2 ", "mc0:boot/boot2.elf\0"},
-		{ 8, "DEV1 boot3 ", "mc0:boot/boot3.elf\0"}
-	};//ends exit_option definition
-
-	u32 exit_option_size = 	sizeof( exit_option ) / sizeof( exit_option[0] );
-
-	int exit_option_toggle = 999;
-
-	//----------------------------------------------------------------------------
-
-	// updateflag -> Aux for the OSD flow control
-	//				-1: Keep into inner loop
-	//				 0: Exit boot inner and outer loop and go to the launch method choosen
-	//				 1: exit inner loop
-	//int updateflag = -1;
+	// -1: Keep into inner loop
+	// 0: Exit both inner and outer loop and go to the launch method choosen
+	// 1: exit inner loop
 	int updateflag = 1;
 
 	// Return value
@@ -593,8 +547,7 @@ int main(void)
 	TimerInit();
 	Timer();
 
-	//At principle we assume there is no vmode chosen
-	mode = 0;
+	//----------------------------------------------------------------------------
 	// Let's Setup GS by the first time
 	Setup_GS();
 	// FontM Init - Make it once and here!!! Avoid avoid EE Exceptions (for instance, memory leak & overflow)
@@ -605,28 +558,10 @@ int main(void)
 	text_height = (26.0f * gsFontM->Spacing * 0.5f);
 	edge_size = text_height;
 
-	// The following two lines are useful for making doctorxyz's development and testing easier
-	// due to his console setup: PS2 Slim SCPH-90006HK (BIOS rev2.30) - Thunder Pro II Gold modchip
-	// predef_vmode_toggle = 11;
-	// exit_option_toggle = 6;
-
 	// Main loop
 outer_loop_restart:
 	while (!(updateflag == 0)) {//---------- Start of outer while loop ----------
 
-		if(updateflag == 1){
-
-			interlace = predef_vmode[predef_vmode_toggle].interlace; 
-			mode = predef_vmode[predef_vmode_toggle].mode;
-			ffmd = predef_vmode[predef_vmode_toggle].ffmd;
-			display  = predef_vmode[predef_vmode_toggle].display;
-			syncv = predef_vmode[predef_vmode_toggle].syncv;
-			smode2 = (ffmd<<1)|interlace;
-
-			UpdateGSMParams(interlace, mode, ffmd, display, syncv, smode2, dx_offset, dy_offset);
-
-		}//ends if
-			
 		gsKit_clear(gsGlobal, Black);
 				
 		// OSD
@@ -634,39 +569,44 @@ outer_loop_restart:
 		rownumber = 4;
 		gsKit_fontm_printf_scaled(gsGlobal, gsFontM, edge_size, (rownumber++)*9, 1, 0.4f, DarkOrangeFont, "%s - by %s", VERSION, AUTHORS);
 		rownumber++;
-		gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, WhiteFont, FONTM_CIRCLE" SDTV (PAL/NTSC)");
+		gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, WhiteFont, FONTM_CIRCLE" SDTV vmodes");
 		rownumber++;
-		gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, WhiteFont, FONTM_SQUARE" HDTV (480p/576p/720p/1080i)");
+		gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, WhiteFont, FONTM_SQUARE" HDTV vmodes");
 		rownumber++;
-		gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, WhiteFont, FONTM_TRIANGLE" VGA (640p/640i)");
+		gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, WhiteFont, FONTM_TRIANGLE" VGA vmodes");
 		rownumber++;
-		gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, WhiteFont, FONTM_CROSS" PS1 SDTV (NTSC/PAL)");
+		gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, WhiteFont, FONTM_CROSS" PS1 SDTV vmodes");
 		rownumber++;
 		rownumber++;
 		gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, WhiteFont, "[DPAD] X and Y axis offsets");
 		rownumber++;
 		rownumber++;
+		gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, WhiteFont, "[L1] Skip Videos fix");
+		rownumber++;
+		rownumber++;
 		gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, WhiteFont, "[SELECT] Exit Method");
 		rownumber++;
 		gsKit_fontm_print_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, WhiteFont, "[START] Exit");
-			rownumber++;
-			rownumber++;
-		if(predef_vmode_toggle != 999) {
-			gsKit_fontm_printf_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, YellowFont, "GS Mode Selected: %s", predef_vmode[predef_vmode_toggle].description);
-			rownumber++;
-		}
-		if(exit_option_toggle != 999) {
-			gsKit_fontm_printf_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, YellowFont, "Exit Method Selected: %s", exit_option[exit_option_toggle].description);
+		rownumber++;
+		rownumber++;
+		if(predef_vmode_idx != 999) {
+			gsKit_fontm_printf_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, YellowFont, "GS Mode Selected: %s", predef_vmode[predef_vmode_idx].desc);
 			rownumber++;
 		}
-		if(dx_offset != 0) {
-			gsKit_fontm_printf_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, YellowFont, "X-axis offset: %+d", dx_offset);
+		if(exit_option_idx != 999) {
+			gsKit_fontm_printf_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, YellowFont, "Exit Method Selected: %s", exit_option[exit_option_idx].desc);
 			rownumber++;
 		}
-		if(dy_offset != 0) {
-			gsKit_fontm_printf_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, YellowFont, "Y-axis offset: %+d", dy_offset);
+		if(XOffset != 0) {
+			gsKit_fontm_printf_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, YellowFont, "X-axis offset: %+d", XOffset);
 			rownumber++;
 		}
+		if(YOffset != 0) {
+			gsKit_fontm_printf_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, YellowFont, "Y-axis offset: %+d", YOffset);
+			rownumber++;
+		}
+		gsKit_fontm_printf_scaled(gsGlobal, gsFontM, edge_size, (++rownumber)*11, 1, 0.4f, YellowFont, "Skip Videos fix: %s", off_on[skip_videos_idx].desc);
+
 		Draw_Screen();
 
 		updateflag = -1;
@@ -676,86 +616,91 @@ outer_loop_restart:
 		//---------- Start of inner while loop ----------
 		while (updateflag == -1) {
 
-			delay(1);
 			while(!(waitAnyPadReady(), readpad(), new_pad)); //await a new button
 			retval = paddata;
 			
 			if(retval == PAD_TRIANGLE)	{ //VGA
-				if (predef_vmode[predef_vmode_toggle].category != VGA_VMODE) predef_vmode_toggle = -1;
+				if (predef_vmode[predef_vmode_idx].category != VGA_VMODE) predef_vmode_idx = -1;
 				do
 				{
-					predef_vmode_toggle++;
-					if(predef_vmode_toggle > (predef_vmode_size - 1)) predef_vmode_toggle = 0;
-				}while (predef_vmode[predef_vmode_toggle].category != VGA_VMODE);
+					predef_vmode_idx++;
+					if(predef_vmode_idx > (predef_vmode_size - 1)) predef_vmode_idx = 0;
+				}while (predef_vmode[predef_vmode_idx].category != VGA_VMODE);
 
 				updateflag = 1; //exit inner loop
 			}	
 			else if(retval == PAD_SQUARE){ //HDTV
-				if (predef_vmode[predef_vmode_toggle].category != HDTV_VMODE) predef_vmode_toggle = -1;
+				if (predef_vmode[predef_vmode_idx].category != HDTV_VMODE) predef_vmode_idx = -1;
 				do
 				{
-					predef_vmode_toggle++;
-					if(predef_vmode_toggle > (predef_vmode_size - 1)) predef_vmode_toggle = 0;
-				}while (predef_vmode[predef_vmode_toggle].category != HDTV_VMODE);
+					predef_vmode_idx++;
+					if(predef_vmode_idx > (predef_vmode_size - 1)) predef_vmode_idx = 0;
+				}while (predef_vmode[predef_vmode_idx].category != HDTV_VMODE);
 
 				updateflag = 1; //exit inner loop
 
 			}	
 			else if(retval == PAD_CIRCLE)	{ //NTSC/PAL
-				if (predef_vmode[predef_vmode_toggle].category != SDTV_VMODE) predef_vmode_toggle = -1;
+				if (predef_vmode[predef_vmode_idx].category != SDTV_VMODE) predef_vmode_idx = -1;
 				do
 				{
-					predef_vmode_toggle++;
-					if(predef_vmode_toggle > (predef_vmode_size - 1)) predef_vmode_toggle = 0;
-				}while (predef_vmode[predef_vmode_toggle].category != SDTV_VMODE);
+					predef_vmode_idx++;
+					if(predef_vmode_idx > (predef_vmode_size - 1)) predef_vmode_idx = 0;
+				}while (predef_vmode[predef_vmode_idx].category != SDTV_VMODE);
 
 				updateflag = 1; //exit inner loop
 			}	
 			else if(retval == PAD_CROSS)	{ //PS1 NTSC/PAL
-				if (predef_vmode[predef_vmode_toggle].category != PS1_VMODE) predef_vmode_toggle = -1;
+				if (predef_vmode[predef_vmode_idx].category != PS1_VMODE) predef_vmode_idx = -1;
 				do
 				{
-					predef_vmode_toggle++;
-					if(predef_vmode_toggle > (predef_vmode_size - 1)) predef_vmode_toggle = 0;
-				}while (predef_vmode[predef_vmode_toggle].category != PS1_VMODE);
+					predef_vmode_idx++;
+					if(predef_vmode_idx > (predef_vmode_size - 1)) predef_vmode_idx = 0;
+				}while (predef_vmode[predef_vmode_idx].category != PS1_VMODE);
 
 				updateflag = 1; //exit inner loop
 			}
 			else if((retval == PAD_SELECT))	{ //Select Exit Method
-				exit_option_toggle++;
-				if(exit_option_toggle > (exit_option_size - 1)) exit_option_toggle = 0;
+				exit_option_idx++;
+				if(exit_option_idx > (exit_option_size - 1)) exit_option_idx = 0;
 				updateflag = 1; //exit inner loop
 			}
 			else if(retval == PAD_START)	{ //Exit GSM
 				updateflag = 0; //exit outer loop
 			}
 			else if((retval == PAD_LEFT))	{ //Decrease DX
-				dx_offset -= 4;
-				if(dx_offset < -(4096/4)) dx_offset += 4;
+				XOffset -= 4;
+				if(XOffset < -(4096/4)) XOffset += 4;
 				updateflag = 1; //exit inner loop
 			}
 			else if((retval == PAD_RIGHT))	{ //Increase DX
-				dx_offset += 4;
-				if(dx_offset > (4096/4)) dx_offset -= 4;
+				XOffset += 4;
+				if(XOffset > (4096/4)) XOffset -= 4;
 				updateflag = 1; //exit inner loop
 			}
 			else if((retval == PAD_UP))	{ //Increase DY
-				dy_offset += 4;
-				if(dy_offset > (2048/4)) dy_offset -= 4;
+				YOffset += 4;
+				if(YOffset > (2048/4)) YOffset -= 4;
 				updateflag = 1; //exit inner loop
 			}
 			else if((retval == PAD_DOWN))	{ //Decrease DY
-				dy_offset -= 4;
-				if(dy_offset < -(2048/4)) dy_offset += 4;
+				YOffset -= 4;
+				if(YOffset < -(2048/4)) YOffset += 4;
 				updateflag = 1; //exit inner loop
 			}
-			
+			else if((retval == PAD_L1))	{ //Skip Videos toggle
+				skip_videos_idx ^= 1;
+				updateflag = 1; //exit inner loop
+			}
+
+		delay(1);
+
 		}	//---------- End of inner while loop ----------
 	}	//---------- End of outer while loop ----------
 
 	updateflag = -1;
 	halfWidth = gsGlobal->Width / 2;
-	if((predef_vmode_toggle == 999)||(exit_option_toggle == 999)){	//Nothing chosen yet
+	if((predef_vmode_idx == 999)||(exit_option_idx == 999)){	//Nothing chosen yet
 		gsKit_clear(gsGlobal, Black);
 		gsFontM->Align = GSKIT_FALIGN_CENTER;
 		gsKit_fontm_print_scaled(gsGlobal, gsFontM, halfWidth, 210, 1, 0.6f, RedFont, "Choose what you want!");
@@ -773,63 +718,42 @@ outer_loop_restart:
 	gsKit_clear(gsGlobal, Black);
 	gsFontM->Align = GSKIT_FALIGN_CENTER;
 	
-	if(exit_option[exit_option_toggle].id == 0) {
+	if(exit_option_idx == 0) {
 		gsKit_fontm_print_scaled(gsGlobal, gsFontM, halfWidth, 210, 1, 0.6f, DeepSkyBlueFont, "Exiting to PS2 BROWSER...");
 	}
 	else {
-		sprintf(tempstr, "%s", exit_option[exit_option_toggle].elf_path);
+		sprintf(tempstr, "%s", exit_option[exit_option_idx].elf_path);
 		strcpy(elf_path, tempstr);
 		gsKit_fontm_printf_scaled(gsGlobal, gsFontM, halfWidth, 210, 1, 0.6f, DeepSkyBlueFont, "Loading %s ...", elf_path);
 	}
 	Draw_Screen();
 	delay(4);
 
-	/*-------------------------------------------------------*/
-	/* Install and Enable Graphics Synthesizer Mode Selector */
-	/*-------------------------------------------------------*/
-
-	/*----------------------------*/
-	/* Replace SetGsCrt in kernel */
-	/*----------------------------*/
-	if(GetSyscallHandler(__NR_SetGsCrt) != &Hook_SetGsCrt) {
-		Old_SetGsCrt = GetSyscallHandler(__NR_SetGsCrt);
-		SetSyscall(__NR_SetGsCrt, &Hook_SetGsCrt);
-	}
-
-	/*----------------------------------------------------------------------------------------------------*/
-	/* Replace Core Debug Exception Handler (V_DEBUG handler) in kernel                                   */
-	/* Exception Vector Address for Debug Level 2 Exception when Stadus.DEV bit is 0 (normal): 0x80000100 */
-	/* 'Level 2' is a generalization of Error Level (from previous MIPS processors)                       */
-	/* When this exception is recognized, control is transferred to the applicable service routine;       */
-	/* in our case the service routine is 'GSHandler'!                                                    */
-	/*----------------------------------------------------------------------------------------------------*/
-	__asm__ __volatile__ (
-	".set noreorder\n"
-	".set noat\n"
-
-	"sync.l\n"
-	"sync.p\n"
-	
-	".set at\n"
-	".set reorder\n"
-	);
-	DI();
-	ee_kmode_enter();
-	*(u32 *)0x80000100 = MAKE_J((int)GSHandler);
-	*(u32 *)0x80000104 = 0;
-	ee_kmode_exit();
-	EI();
-
 	// Cleanup gsKit and others stuffs
 	gsKit_vram_clear(gsGlobal);
 	gsKit_deinit_global(gsGlobal); // Free all memory allocated by gsGlobal structures
 	CleanUp();
 
+	InitGSM(predef_vmode_idx, XOffset, YOffset, off_on[skip_videos_idx].value);
+
 	// Call sceSetGsCrt syscall in order to "bite" the new video mode
-	gs_setmode(predef_vmode[predef_vmode_toggle].mode, predef_vmode[predef_vmode_toggle].mode, predef_vmode[predef_vmode_toggle].ffmd);
+	__asm__ __volatile__(
+		"li  $3, 0x02\n"   // Syscall Number = 2 (sceGsCrt)
+		"add $4, $0, %0\n"   // interlace
+		"add $5, $0, %1\n"   // mode
+		"add $6, $0, %2\n"   // ffmd
+
+		"syscall\n"			// Perform the syscall
+		"nop\n"				// nop for Branch delay slot
+
+		:
+		:	"r" (predef_vmode[predef_vmode_idx].interlace), \
+			"r" (predef_vmode[predef_vmode_idx].mode), \
+			"r" (predef_vmode[predef_vmode_idx].ffmd)
+	);
 
 	// Exit from GSM to the selected method
-	if(exit_option[exit_option_toggle].id == 0) {
+	if(exit_option_idx == 0) {
 		__asm__ __volatile__( // Run PS2 Browser
 		".set noreorder\n"
 		"li $3, 0x04\n"
@@ -839,7 +763,7 @@ outer_loop_restart:
 		);
 	}
 	else {
-		//RunLoaderElf("mc0:boot/boot1.elf\0",party);
+		//RunLoaderElf("mc0:BOOT/BOOT.ELF\0",party);
 		RunLoaderElf(elf_path, party);	// Run ELF
 	}
 
