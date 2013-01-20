@@ -1,4 +1,19 @@
-GSModeSelector releases by doctorxyz and dlanor (at psx-scene)
+GSModeSelector releases (at psx-scene)
+
+GSModeSelector v0.37 (2013.01.20) by doctorxyz
+GUI:
+- 30 predef vmodes, including DTV 576P vmode for older PS2 models and the unpublished DTV 1080P one
+- Skip Videos Fix toggle
+- Optimized Exit options
+- C code housekeeping
+Core:
+- SetGsCrt replacement code for DTV 576P vmode (work even on older PS2 models - made possible by SP193 and reprep)
+- SetGsCrt replacement code for unpublished DTV 1080P vmode (made possible by SP193 and reprep)
+- Remove all breakpoints (even when they are not enabled) whenever SetGsCrt syscall is called, then re-enable GSHandler (GSM Data Address Write Breakpoint)
+- Skip Videos Fix (sceMpegIsEnd) code - basic method by nachbrenner - If enabled, On-The-Fly patcher applies it whenever SetGsCrt syscall is called 
+- Added SMODE1, SMODE2, SRFSH, SYNCH1, SYNCH2 and CSR definibuildingtions for future features
+- Disabled warning on building time if any statement expands to more than one machine instruction
+- ASM code cosmetics
 
 GSModeSelector v0.36b (2013.01.16) by doctorxyz
 - GUI can be bootable and relaunchable by FCMB E1 launch keys (due to DeInitGSM, New IOP reboot sequence, simplified Makefile, new Launcher based on uLE v4.42a, ...)

@@ -2,6 +2,7 @@
 # Graphics Synthesizer Mode Selector (a.k.a. GSM) - Force (set and keep) a GS Mode, then load & exec a PS2 ELF
 #-------------------------------------------------------------------------------------------------------------
 # Copyright 2009, 2010, 2011 doctorxyz & dlanor
+# Copyright 2011, 2012 doctorxyz, SP193 & reprep
 # Licenced under Academic Free License version 2.0
 # Review LICENSE file for further details.
 #
@@ -9,26 +10,46 @@
 #include <ee_cop0_defs.h>
 #include <syscallnr.h>
 
+# -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+# GS Registers
 KSEG=0x00080000
 GS_BASE=0x12000000
+GS_SMODE1=GS_BASE+0x0010
 GS_SMODE2=GS_BASE+0x0020
+GS_SRFSH=GS_BASE+0x0030
+GS_SYNCH1=GS_BASE+0x0040
+GS_SYNCH2=GS_BASE+0x0050
 GS_SYNCV=GS_BASE+0x0060
 GS_DISPLAY1=GS_BASE+0x0080
 GS_DISPLAY2=GS_BASE+0x00A0
 GS_BGCOLOUR=GS_BASE+0x00E0
+GS_CSR=GS_BASE+0x1000
+
+# Additional video modes (made possible by SP193 and reprep)
+GS_MODE_DTV_576P=0x53
+GS_MODE_DTV_1080P=0x54
+
+# -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 .p2align 4	# align 16 bytes (IMPORTANT!!!)
+
 .set push
+
 .set noreorder # disable assembler reorder mode, so the code will not be optimized or changed in any way, giving complete instruction order control to the programmer
 .set noat # disable assembler from using register $1 (known as the assembler temporary, or $at register) to hold intermediate values when performing macro expansions
 .set macro # disable warning if any statement expands to more than one machine instruction
 #.set nomacro # enable warning if any statement expands to more than one machine instruction
+
+# -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 #####################################################
 # .gsm_engine section
 #####################################################
 
 .section .gsm_engine, "a"
+
+# -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 ############
 # Variables
@@ -56,10 +77,10 @@ Source_DISPLAY:		.dword 0
 Source_SYNCV:		.dword 0
 
 .globl DOUBLE_HEIGHT_adaptation
-DOUBLE_HEIGHT_adaptation:		.byte 0			# Flag -> Height Doubling at INT&FFMD
+DOUBLE_HEIGHT_adaptation:		.byte 0	# Flag -> Height Doubling at INT&FFMD
 
 .globl SMODE2_adaptation
-SMODE2_adaptation:			.byte 0			# Flag -> Adapted SMODE2 patch value
+SMODE2_adaptation:			.byte 0	# Flag -> Adapted SMODE2 patch value
 
 .p2align 4	# align 16 bytes (IMPORTANT!!!)
 
@@ -86,6 +107,9 @@ SMODE2_fix:		.byte 0			# Byte flag
 .globl SYNCV_fix
 SYNCV_fix:		.byte 0			# Byte flag
 
+.globl skip_videos_fix
+skip_videos_fix:	.byte 0			# Byte flag
+
 .p2align 4	# align 16 bytes (IMPORTANT!!!)
 
 .globl X_offset
@@ -97,6 +121,17 @@ Y_offset:		.word 0			# Y-axis offset
 
 .globl Adapted_DISPLAY
 Adapted_DISPLAY:	.dword 0
+
+.globl Pattern_Code_Ptr
+Pattern_Code_Ptr:	.word 0			# Pointer to Pattern Code
+
+.globl Pattern_Mask_Ptr
+Pattern_Mask_Ptr:	.word 0			# Pointer to Pattern Mask Address
+
+.globl Replacement_Code_Ptr
+Replacement_Code_Ptr:	.word 0			# Pointer to Replacement Code Address
+
+# -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 ###############################
 # Opcode emulation jump tables
@@ -174,6 +209,257 @@ and	$a3, $a0,$a2				# a3 = Interlace & Field
 andi	$a3, $a3,1				# a3 &= 1 limited to 1 bit
 sb	$a3, %lo(DOUBLE_HEIGHT_adaptation)($v0)
 
+//-----------------------------------------------------------------------------------------
+
+// Remove all breakpoints (even when they aren't enabled)
+di			// Disable Interupts
+li $a2, 0x8000
+mtbpc $a2		// All breakpoints off (BED = 1)
+sync.p			// Await instruction completion
+
+//-----------------------------------------------------------------------------------------
+
+lb	$a0, %lo(skip_videos_fix)($v0)		# a0 = skip_videos_fix
+bnel	$a0,$zero, Skip_skip_videos_Patch	# in case of Skip Videos fix is disabled (i.e. not equal to zero)
+nop					# skip this fix
+// 'skip videos' (sceMpegIsEnd) code - basic method by nachbrenner (original idea from CMX and bongsan)
+// Source: http://replay.waybackmachine.org/20040419134616/http://nachbrenner.pcsx2.net/chapter1.html
+
+la	$a2, Pattern_Code_sceMpegIsEnd					# $a2 = pattern start address
+la	$a3, Pattern_Mask_sceMpegIsEnd					# $a3 = pattern mask start address
+la	$a1, Replacement_Code_sceMpegIsEnd				# $a1 = replacement code address
+jal	OnTheFlyPatcher
+nop
+
+//-----------------------------------------------------------------------------------------
+
+Skip_skip_videos_Patch:
+ld	$a0, %lo(Target_SMODE2)($v0)
+sb	$a0, %lo(SMODE2_adaptation)($v0)
+lw	$a0, %lo(Target_INTERLACE)($v0)
+lw	$a1, %lo(Target_MODE)($v0)
+lw	$a2, %lo(Target_FFMD)($v0)
+sync.l						# The opcodes sync.l and sync.p made a lot of games compatible
+sync.p						# They ensure all values are stable before the following call
+
+//-----------------------------------------------------------------------------------------
+
+//
+//This function will get called first, in place of the original SetGsCrt() syscall handler. It will check the video mode argument.
+//If it's one of the extended video modes, do not call the original SetGsCrt() syscall handler, 
+//but handle GS configuration on our own.
+//Otherwise, call the original SetGsCrt() syscall handler and let it configure the GS for us.
+//
+
+li	$a3, GS_MODE_DTV_576P
+bne	$a1, $a3, Skip_DTV_576P
+nop
+
+//-----------------------------------------------------------------------------------------
+
+DTV_576P:
+
+//$v0 = Base address
+lui	$v0,(KSEG >> 16)
+//$a0 = Target_SMODE2
+ld	$a0, %lo(Target_SMODE2)($v0)
+
+//$v0 = GS base address
+lui		$v0, (GS_BASE >> 16)
+
+//*GS_SMODE1=0x00000017424B0504;
+lui     $v1, 0x0017
+ori     $v1, 0x424B
+dsll    $v1, 16
+ori     $v1, 0x0504
+sd		$v1, %lo(GS_SMODE1)($v0)	# store it
+
+//*GS_SYNCH1=0x000402E02003C827;
+lui     $v1, 0x0004
+ori     $v1, 0x02E0
+dsll    $v1, 16
+ori     $v1, 0x2003
+dsll    $v1, 16
+ori     $v1, 0xC827
+sd		$v1, %lo(GS_SYNCH1)($v0)	# store it
+
+//*GS_SYNCH2=0x0019CA67;
+lui     $v1, 0x0019
+ori     $v1, 0xCA67
+sd		$v1, %lo(GS_SYNCH2)($v0)	# store it
+
+//*GS_SYNCV=0x00A9000002700005;
+lui     $v1, 0x00A9
+ori     $v1, 0x0000
+dsll    $v1, 16
+ori     $v1, 0x0270
+dsll    $v1, 16
+ori     $v1, 0x0005
+sd		$v1, %lo(GS_SYNCV)($v0)	# store it
+
+//*GS_SMODE2=have_SMODE2_write;
+or      $v1, $zero, $a0				# 	v1 = $a0 = Target_SMODE2;
+sd		$v1, %lo(GS_SMODE2)($v0)	# store it
+
+//*GS_SRFSH=0;
+li      $v1, 4
+sd		$v1, %lo(GS_SRFSH)($v0)	# store it
+
+//*GS_SMODE1=0x0000001742490504;
+lui     $v1, 0x0017
+ori     $v1, 0x4249
+dsll    $v1, 16
+ori     $v1, 0x0504
+sd		$v1, %lo(GS_SMODE1)($v0)	# store it
+
+//delay some miliseconds...
+li $v1, 0x7A120
+nop
+DTV_576P_SMODE1_delay_loop:
+vnop
+vnop
+addiu $v1, 0xFFFF
+vnop
+vnop
+bnez $v1, DTV_576P_SMODE1_delay_loop
+nop
+
+//*GS_SMODE1=0x0000001742480504;	// Have bits 16 and 17 cleared.
+lui     $v1, 0x0017
+ori     $v1, 0x4248
+dsll    $v1, 16
+ori     $v1, 0x0504
+sd		$v1, %lo(GS_SMODE1)($v0)	# store it
+
+beqzl $zero, Skip_Call_Original_SetGsCrt
+nop
+
+//-----------------------------------------------------------------------------------------
+
+Skip_DTV_576P:
+li	$a3, GS_MODE_DTV_1080P
+bne	$a1, $a3, Skip_DTV_1080P
+nop
+
+//-----------------------------------------------------------------------------------------
+
+DTV_1080P:
+
+//$v0 = Base address
+lui	$v0,(KSEG >> 16)
+//$a0 = Target_SMODE2
+ld	$a0, %lo(Target_SMODE2)($v0)
+
+//$v0 = GS base address
+lui		$v0, (GS_BASE >> 16)
+
+//*GS_SMODE1=0x00000003422304B1
+lui     $v1, 0x0003
+ori     $v1, 0x4223
+dsll    $v1, 16
+ori     $v1, 0x04B1
+or      $v1, $v0, $v1
+sd		$v1, %lo(GS_SMODE1)($v0)	# store it
+
+//if((*GS_REG_CSR>>16&0xFF)>=0x19){
+ld      $v1, %lo(GS_CSR)($v0)	# load it
+dsrl    $v1, 16
+andi    $v1, 0xFF
+sltiu   $v1, 0x19
+bnez    $v1, DTV_1080P_else
+nop
+
+//		*GS_REG_SYNCH1=0x 0003 4420 0B04 182D;
+lui     $v1, 0x0003
+ori     $v1, 0x4420
+dsll    $v1, 16
+ori     $v1, 0x0B04
+dsll    $v1, 16
+ori     $v1, 0x182D
+sd		$v1, %lo(GS_SYNCH1)($v0)	# store it
+
+//		*GS_REG_SYNCH2=0x 0020 FB61;
+lui     $v1, 0x0020
+ori     $v1, 0xFB61
+sd		$v1, %lo(GS_SYNCH2)($v0)	# store it
+
+beqzl	$zero, DTV_1080P_endif
+nop
+
+//	}
+//	else{
+DTV_1080P_else:
+//		*GS_REG_SYNCH1=0x 0003 4420 0B04 3829;
+lui     $v1, 0x0003
+ori     $v1, 0x4420
+dsll    $v1, 16
+ori     $v1, 0x0B04
+dsll    $v1, 16
+ori     $v1, 0x3829
+sd		$v1, %lo(GS_SYNCH1)($v0)	# store it
+
+//		*GS_REG_SYNCH2=0x 0020 EB63;
+lui     $v1, 0x0020
+ori     $v1, 0xEB63
+sd		$v1, %lo(GS_SYNCH2)($v0)	# store it
+
+//	}
+DTV_1080P_endif:
+//*GS_SYNCV=0x0150 E002 01C0 0005;
+lui     $v1, 0x0150
+ori     $v1, 0xE002
+dsll    $v1, 16
+ori     $v1, 0x01C0
+dsll    $v1, 16
+ori     $v1, 0x0005
+sd		$v1, %lo(GS_SYNCV)($v0)	# store it
+
+//*GS_SMODE2=have_SMODE2_write;
+or      $v1, $zero, $a0				# 	v1 = $a0 = Target_SMODE2;
+sd		$v1, %lo(GS_SMODE2)($v0)	# store it
+
+//*GS_SRFSH=0;
+li      $v1, 4
+sd		$v1, %lo(GS_SRFSH)($v0)	# store it
+
+//*GS_SMODE1=0x00000003422204B1;
+lui     $v1, 0x0003
+ori     $v1, 0x4222
+dsll    $v1, 16
+ori     $v1, 0x04B1
+sd		$v1, %lo(GS_SMODE1)($v0)	# store it
+
+//delay some miliseconds...
+li $v1, 0x7A120
+nop
+DTV_1080P_SMODE1_delay_loop:
+vnop
+vnop
+addiu $v1, 0xFFFF
+vnop
+vnop
+bnez $v1, DTV_1080P_SMODE1_delay_loop
+nop
+
+//*GS_SMODE1=0x00000003422004B1;	// Have bits 16 and 17 cleared.
+lui     $v1, 0x0003
+ori     $v1, 0x4220
+dsll    $v1, 16
+ori     $v1, 0x04B1
+sd		$v1, %lo(GS_SMODE1)($v0)	# store it
+
+beqzl	$zero, Skip_Call_Original_SetGsCrt
+nop
+
+//-----------------------------------------------------------------------------------------
+Skip_DTV_1080P:
+lw	$a3, %lo(Old_SetGsCrt)($v0)		# a3 -> original SetGsCrt function
+jalr	$a3							# Call original SetGsCrt
+nop 
+
+//-----------------------------------------------------------------------------------------
+Skip_Call_Original_SetGsCrt:
+
 //Re-enable GSHandler whenever Hook_SetGsCrt is called
 //This aggressive approach is needed for those titles which disable breakpoints 
 //For instance: UP (SLUS 21864)
@@ -182,8 +468,8 @@ sb	$a3, %lo(DOUBLE_HEIGHT_adaptation)($v0)
 // Set Data Address Write Breakpoint
 // Trap writes to GS registers, so as to control their values
 	
-li $a0, 0x12000000	// Address base for trapping
-li $a1, 0x1FFFFE1F	// Address mask for trapping	//DOCTORXYZ
+lui $a0, (GS_BASE >> 16)	// Address base for trapping
+li $a1, 0x1FFFFE1F			// Address mask for trapping	//DOCTORXYZ
 			//We trap writes to 0x12000000 + 0x00,0x20,0x40,0x60,0x80,0xA0,0xC0,0xE0,0x100,0x120,0x140,0x160,0x180,0x1A0,0x1C0,0x1E0	//DOCTORXYZ
 			//We only want 0x20, 0x60, 0x80, 0xA0, 0x100, but can't mask for that combination //DOCTORXYZ
 			//But the trapping range is now extended to match all kernel access segments
@@ -216,17 +502,6 @@ nop
 
 //-----------------------------------------------------------------------------------------
 
-ld	$a0, %lo(Target_SMODE2)($v0)
-sb	$a0, %lo(SMODE2_adaptation)($v0)
-lw	$a0, %lo(Target_INTERLACE)($v0)
-lw	$a1, %lo(Target_MODE)($v0)
-lw	$a2, %lo(Target_FFMD)($v0)
-lw	$a3, %lo(Old_SetGsCrt)($v0)		# a3 -> original SetGsCrt function
-sync.l						# The opcodes sync.l and sync.p made a lot of games compatible
-sync.p						# They ensure all values are stable before the following call
-
-jalr	$a3					# Call original SetGsCrt
-nop 
 ld	$ra, 0($sp)				# Pull return address from stack 
 jr	$ra					# Return to caller
 addiu	$sp, $sp, 0x0010			# Restore sp during return
@@ -984,6 +1259,123 @@ nop
 
 end_GSHandler:
 .end	GSHandler
+
+//--------------------
+// On-The-Fly patcher
+//--------------------
+
+#.globl OnTheFlyPatcher
+.ent OnTheFlyPatcher
+OnTheFlyPatcher:
+
+lui	$a0,(KSEG >> 16)		# Base Address
+sw	$a2, %lo(Pattern_Code_Ptr)($a0)		# Store Pattern Code Address
+sw	$a3, %lo(Pattern_Mask_Ptr)($a0)		# Store Pattern Mask Address
+sw	$a1, %lo(Replacement_Code_Ptr)($a0)	# Store Replacement Code Address
+
+sq	$v0, 0x20($a0)			# v0
+sq	$v1, 0x30($a0)			# v1
+sq	$t0, 0x80($a0)			# t0
+sq	$t1, 0x90($a0)			# t1
+sq	$t2, 0xA0($a0)			# t2
+sq	$t3, 0xB0($a0)			# t3
+sq	$t4, 0xC0($a0)			# t4
+sq	$t5, 0xD0($a0)			# t5
+
+li	$a0, 0x000D0000			# $a0 = scan start address
+li	$a1, 0x02000000			# $a1 = scan end address
+li	$v0, 0xFFFFFFFF			# $v0 = Ending (Wild Card) Value
+lui	$t5,(KSEG >> 16)		# Base Address
+beqzl	$zero, OnTheFlyPatcher_Start
+nop
+
+OnTheFlyPatcher_OuterLoop:
+or	$a0,$zero,$t4			# $a0 = restore current scan address (from temporary $t4)
+addu	$a0, $a0, 4			# increase scan address
+slt	$t0, $a0, $a1			# compare current scan address with end scan address
+beqz	$t0, OnTheFlyPatcher_End		# continue comparison until the end scan address
+nop
+
+OnTheFlyPatcher_Start:
+or	$t4,$zero,$a0			# $t4 = temporary store of current scan address (obtained from $a0)
+lw	$a2, %lo(Pattern_Code_Ptr)($t5)		# Restore Pattern Code Address
+lw	$a3, %lo(Pattern_Mask_Ptr)($t5)		# Restore Pattern Mask Address
+
+OnTheFlyPatcher_InnerLoop:
+lw	$t0, 0($a0)				# $t0 = current scan value
+lw	$t1, 0($a2)				# $t1 = current pattern value
+lw	$t2, 0($a3)				# $t2 = current pattern mask value
+
+beq	$v0, $t1, OnTheFlyPatcher_InnerLoop_Exit	# continue inner comparison until matched all whole thing
+nop
+
+and	$v1, $t0, $t2			# $v1 = current scan masked value
+and	$t3, $t1, $t2			# $t3 = current pattern masked value
+bne	$v1, $t3, OnTheFlyPatcher_OuterLoop	# stop inner comparison in case of the [current scan masked value] not be equal to the [current pattern masked value]
+nop
+
+addu	$a0, $a0, 4					# increase scan address
+addu	$a2, $a2, 4					# increase pattern address
+addu	$a3, $a3, 4					# increase pattern mask address
+beqzl	$zero, OnTheFlyPatcher_InnerLoop	# continue inner comparison until matched all whole thing
+nop
+
+OnTheFlyPatcher_InnerLoop_Exit:
+
+# PATCH THE ORIGINAL CODE
+
+or	$a0,$zero,$t4					# $a0 = restore current scan address (from temporary $t4) = target address
+lw	$a1, %lo(Replacement_Code_Ptr)($t5)	# Restore Replacement Code Address
+
+OnTheFlyPatcher_Looping:
+lw     $v1, 0($a1)					# $v1 = current replacement code value
+
+beq	$v0, $v1, OnTheFlyPatcher_End			# continue replacing until the whole thing be done
+nop
+
+addiu   $a1, $a1, 4					# increase current replacement code address
+sw      $v1, 0($a0)					# store the [current replacement code value] ($v1) into the [current target address] ($a0) 
+addiu   $a0, $a0, 4					# increase current target address
+beqzl    $zero, OnTheFlyPatcher_Looping			# continue replacing until the whole thing be done
+nop
+
+OnTheFlyPatcher_End:
+
+lui	$a0,(KSEG >> 16)		# Base Address
+lq	$t5, 0xD0($a0)			# t5
+lq	$t4, 0xC0($a0)			# t4
+lq	$t3, 0xB0($a0)			# t3
+lq	$t2, 0xA0($a0)			# t2
+lq	$t1, 0x90($a0)			# t1
+lq	$t0, 0x80($a0)			# t0
+lq	$v1, 0x30($a0)			# v1
+lq	$v0, 0x20($a0)			# v0
+
+jr $ra
+nop
+
+.end OnTheFlyPatcher
+
+# -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+.p2align 4	# align 16 bytes (IMPORTANT!!!)
+# sceMpegIsEnd pattern, extracted from "Woody Woodpecker: Escape from Buzz Buzzard Park (SLES-50613 PAL)"
+Pattern_Code_sceMpegIsEnd:
+.word 0x8c830040 # lw	$v1, $0040($a0)
+.word 0x03e00008 # jr	$ra            
+.word 0x8c620000 # lw	$v0, 0($v1)    
+.word 0xFFFFFFFF # Ending (Wild Card) Value
+Pattern_Mask_sceMpegIsEnd:						
+.word 0xFFFFFFFF
+.word 0xFFFFFFFF
+.word 0xFFFFFFFF
+Replacement_Code_sceMpegIsEnd:
+.word 0x8c830040 # lw	$v1, $0040($a0)
+.word 0x03e00008 # jr	$ra            
+.word 0x24020001 # addiu 	$v0, $zero, 1 <- HERE!!!
+.word 0xFFFFFFFF # Ending (Wild Card) Value
+
+# -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 .set pop
 
