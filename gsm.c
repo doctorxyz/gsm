@@ -79,14 +79,16 @@ extern u32 Source_INTERLACE _GSM_ENGINE_;
 extern u32 Source_MODE _GSM_ENGINE_;
 extern u32 Source_FFMD _GSM_ENGINE_;
 
-extern u64 Calculated_DISPLAY _GSM_ENGINE_;
+extern u64 Calculated_DISPLAY1 _GSM_ENGINE_;
+extern u64 Calculated_DISPLAY2 _GSM_ENGINE_;
 
 extern u32 Target_INTERLACE _GSM_ENGINE_;
 extern u32 Target_MODE _GSM_ENGINE_;
 extern u32 Target_FFMD _GSM_ENGINE_;
 
 extern u64 Target_SMODE2 _GSM_ENGINE_;
-extern u64 Target_DISPLAY _GSM_ENGINE_;
+extern u64 Target_DISPLAY1 _GSM_ENGINE_;
+extern u64 Target_DISPLAY2 _GSM_ENGINE_;
 extern u64 Target_SYNCV _GSM_ENGINE_;
 
 extern u8 automatic_adaptation _GSM_ENGINE_;
@@ -251,23 +253,24 @@ static inline void UpdateGSMParams(u32 interlace, u32 mode, u32 ffmd, u64 displa
 	DI();
 	ee_kmode_enter();
 
-	Target_INTERLACE 	= (u32) interlace;
-	Target_MODE 		= (u32) mode;
-	Target_FFMD 		= (u32) ffmd;
+	Target_INTERLACE		= (u32) interlace;
+	Target_MODE				= (u32) mode;
+	Target_FFMD				= (u32) ffmd;
 
-	Target_SMODE2 		= (u8) smode2;
-	Target_DISPLAY 		= (u64) display;
-	Target_SYNCV 		= (u64) syncv;
+	Target_SMODE2			= (u8) smode2;
+	Target_DISPLAY1			= (u64) display;
+	Target_DISPLAY2			= (u64) display;
+	Target_SYNCV			= (u64) syncv;
 
-	automatic_adaptation	= 0;		// Automatic Adaptation -> 0 = On, 1 = Off ; Default = 0 = On
-	DISPLAY_fix			= 0;			// DISPLAYx Fix ---------> 0 = On, 1 = Off ; Default = 0 = On
-	SMODE2_fix			= 0;			// SMODE2 Fix -----------> 0 = On, 1 = Off ; Default = 0 = On
-	SYNCV_fix			= 0;			// SYNCV Fix ------------> 0 = On, 1 = Off ; Default = 0 = On
+	automatic_adaptation	= 0;				// Automatic Adaptation -> 0 = On, 1 = Off ; Default = 0 = On
+	DISPLAY_fix				= 0;				// DISPLAYx Fix ---------> 0 = On, 1 = Off ; Default = 0 = On
+	SMODE2_fix				= 0;				// SMODE2 Fix -----------> 0 = On, 1 = Off ; Default = 0 = On
+	SYNCV_fix				= 0;				// SYNCV Fix ------------> 0 = On, 1 = Off ; Default = 0 = On
 
-	X_offset			= dx_offset;	// X-axis offset -> Use it only when automatic adaptations formulas don't fit into your needs
-	Y_offset			= dy_offset;	// Y-axis offset -> Use it only when automatic adaptations formulas dont't fit into your needs
+	X_offset				= dx_offset;		// X-axis offset -> Use it only when automatic adaptations formulas don't fit into your needs
+	Y_offset				= dy_offset;		// Y-axis offset -> Use it only when automatic adaptations formulas dont't fit into your needs
 
-	skip_videos_fix		= skip_videos ^ 1;	// Skip Videos Fix ------------> 0 = On, 1 = Off ; Default = 0 = On
+	skip_videos_fix			= skip_videos ^ 1;	// Skip Videos Fix ------------> 0 = On, 1 = Off ; Default = 0 = On
 
 	ee_kmode_exit();
 	EI();
