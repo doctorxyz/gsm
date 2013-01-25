@@ -1,3 +1,6 @@
+Core:
+- Implemented separate access trap handling for DISPLAY1 and DISPLAY2 registers
+
 GSModeSelector releases (at psx-scene)
 
 GSModeSelector v0.37 (2013.01.20) by doctorxyz
@@ -11,7 +14,7 @@ Core:
 - SetGsCrt replacement code for unpublished DTV 1080P vmode (made possible by SP193 and reprep)
 - Remove all breakpoints (even when they are not enabled) whenever SetGsCrt syscall is called, then re-enable GSHandler (GSM Data Address Write Breakpoint)
 - Skip Videos Fix (sceMpegIsEnd) code - basic method by nachbrenner - If enabled, On-The-Fly patcher applies it whenever SetGsCrt syscall is called 
-- Added SMODE1, SMODE2, SRFSH, SYNCH1, SYNCH2 and CSR definibuildingtions for future features
+- Added SMODE1, SMODE2, SRFSH, SYNCH1, SYNCH2 and CSR definitions for future features
 - Disabled warning on building time if any statement expands to more than one machine instruction
 - ASM code cosmetics
 
