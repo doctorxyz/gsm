@@ -244,6 +244,135 @@ u64 WaitTime = 0; //used for time waiting
 
 struct gsm_settings *GSM = NULL;
 
+#define DI2	DIntr
+#define EI2	EIntr
+
+_GSM_ENGINE_ int ee_kmode_enter2() {
+	u32 status, mask;
+
+	__asm__ volatile (
+		".set\tpush\n\t"		\
+		".set\tnoreorder\n\t"		\
+		"mfc0\t%0, $12\n\t"		\
+		"li\t%1, 0xffffffe7\n\t"	\
+		"and\t%0, %1\n\t"		\
+		"mtc0\t%0, $12\n\t"		\
+		"sync.p\n\t"
+		".set\tpop\n\t" : "=r" (status), "=r" (mask));
+
+	return status;
+}
+
+_GSM_ENGINE_ int ee_kmode_exit2() {
+	int status;
+
+	__asm__ volatile (
+		".set\tpush\n\t"		\
+		".set\tnoreorder\n\t"		\
+		"mfc0\t%0, $12\n\t"		\
+		"ori\t%0, 0x10\n\t"		\
+		"mtc0\t%0, $12\n\t"		\
+		"sync.p\n\t" \
+		".set\tpop\n\t" : "=r" (status));
+
+	return status;
+}
+
+_GSM_ENGINE_ void SetSyscall2(int number, void (*functionPtr)(void)) {
+	__asm__ __volatile__ (
+	".set noreorder\n"
+	".set noat\n"
+	"li $3, 0x74\n"
+    "add $4, $0, %0    \n"   // Specify the argument #1
+    "add $5, $0, %1    \n"   // Specify the argument #2
+   	"syscall\n"
+	"jr $31\n"
+	"nop\n"
+	".set at\n"
+	".set reorder\n"
+    :
+    : "r"( number ), "r"( functionPtr )
+    );
+}
+
+_GSM_ENGINE_ u32* GetROMSyscallVectorTableAddress(void) {
+	//Search for Syscall Table in ROM
+	u32 i;
+	u32 startaddr;
+	u32* ptr;
+	u32* addr;
+	startaddr = 0;
+	for (i = 0x1FF00000; i < 0x1FFFFFFF; i+= 4)
+	{
+		if ( *(u32*)(i + 0) == 0x40196800 )
+		{
+			if ( *(u32*)(i + 4) == 0x3C1A8001 )
+			{
+				startaddr = i - 8;
+				break;
+			}
+		}
+	}
+	ptr = (u32 *) (startaddr + 0x02F0);
+	addr = (u32*)((ptr[0] << 16) | (ptr[2] & 0xFFFF));
+	addr = (u32*)((u32)addr & 0x1fffffff);
+	addr = (u32*)((u32)addr + startaddr);
+	return addr;
+}
+
+_GSM_ENGINE_ void InitGSM(u32 interlace, u32 mode, u32 ffmd, u64 display, u64 syncv, u64 smode2, int dx_offset, int dy_offset, u8 skip_videos)
+ {
+
+	u32* ROMSyscallTableAddress;
+
+	// Update GSM params
+	DI2();
+	ee_kmode_enter2();
+
+	Target_INTERLACE		= interlace;
+	Target_MODE				= mode;
+	Target_FFMD				= ffmd;
+	Target_DISPLAY1			= display;
+	Target_DISPLAY2			= display;
+	Target_SYNCV			= syncv;
+	Target_SMODE2			= smode2;
+	X_offset				= dx_offset;		// X-axis offset -> Use it only when automatic adaptations formulas don't fit into your needs
+	Y_offset				= dy_offset;		// Y-axis offset -> Use it only when automatic adaptations formulas dont't fit into your needs
+	skip_videos_fix			= skip_videos ^ 1;	// Skip Videos Fix ------------> 0 = On, 1 = Off ; Default = 0 = On
+	
+	automatic_adaptation	= 0;				// Automatic Adaptation -> 0 = On, 1 = Off ; Default = 0 = On
+	DISPLAY_fix				= 0;				// DISPLAYx Fix ---------> 0 = On, 1 = Off ; Default = 0 = On
+	SMODE2_fix				= 0;				// SMODE2 Fix -----------> 0 = On, 1 = Off ; Default = 0 = On
+	SYNCV_fix				= 0;				// SYNCV Fix ------------> 0 = On, 1 = Off ; Default = 0 = On
+
+	ee_kmode_exit2();
+	EI2();
+
+	// Hook SetGsCrt
+	ROMSyscallTableAddress = GetROMSyscallVectorTableAddress();
+	Old_SetGsCrt = (void*)ROMSyscallTableAddress[2];
+	SetSyscall2(2, &Hook_SetGsCrt);
+
+	// Remove all breakpoints (even when they aren't enabled)
+	__asm__ __volatile__ (
+	".set noreorder\n"
+	".set noat\n"
+	"li $k0, 0x8000\n"
+	"mtbpc $k0\n"			// All breakpoints off (BED = 1)
+	"sync.p\n"				// Await instruction completion
+	".set at\n"
+	".set reorder\n"
+	);
+
+	// Replace Core Debug Exception Handler (V_DEBUG handler) by GSHandler
+	DI2();
+	ee_kmode_enter2();
+	*(u32 *)0x80000100 = MAKE_J((int)GSHandler);
+	*(u32 *)0x80000104 = 0;
+	ee_kmode_exit2();
+	EI2();
+}
+
 /*-------------------*/
 /* Update GSM params */
 /*-------------------*/
@@ -434,55 +563,6 @@ void LoadModules(void)
 		printf("\tERROR: cannot load padman: %d.\n", id);
 		return;
 	}
-}
-
-void InitGSM(unsigned int predef_vmode_idx, int XOffset, int YOffset, u8 skip_videos_idx)
-{
-	UpdateGSMParams(predef_vmode[predef_vmode_idx].interlace, \
-					predef_vmode[predef_vmode_idx].mode, \
-					predef_vmode[predef_vmode_idx].ffmd, \
-					predef_vmode[predef_vmode_idx].display, \
-					predef_vmode[predef_vmode_idx].syncv, \
-					((predef_vmode[predef_vmode_idx].ffmd)<<1)|(predef_vmode[predef_vmode_idx].interlace), \
-					XOffset, \
-					YOffset, \
-					skip_videos_idx);
-
-	/*-------------------------------------------------------*/
-	/* Install and Enable Graphics Synthesizer Mode Selector */
-	/*-------------------------------------------------------*/
-
-	/*----------------------------*/
-	/* Replace SetGsCrt in kernel */
-	/*----------------------------*/
-	if(GetSyscallHandler(__NR_SetGsCrt) != &Hook_SetGsCrt) {
-		Old_SetGsCrt = GetSyscallHandler(__NR_SetGsCrt);
-		SetSyscall(__NR_SetGsCrt, &Hook_SetGsCrt);
-	}
-
-	/*----------------------------------------------------------------------------------------------------*/
-	/* Replace Core Debug Exception Handler (V_DEBUG handler) in kernel                                   */
-	/* Exception Vector Address for Debug Level 2 Exception when Stadus.DEV bit is 0 (normal): 0x80000100 */
-	/* 'Level 2' is a generalization of Error Level (from previous MIPS processors)                       */
-	/* When this exception is recognized, control is transferred to the applicable service routine;       */
-	/* in our case the service routine is 'GSHandler'!                                                    */
-	/*----------------------------------------------------------------------------------------------------*/
-	__asm__ __volatile__ (
-	".set noreorder\n"
-	".set noat\n"
-
-	"sync.l\n"
-	"sync.p\n"
-	
-	".set at\n"
-	".set reorder\n"
-	);
-	DI();
-	ee_kmode_enter();
-	*(u32 *)0x80000100 = MAKE_J((int)GSHandler);
-	*(u32 *)0x80000104 = 0;
-	ee_kmode_exit();
-	EI();
 }
 
 int main(void)
@@ -737,7 +817,15 @@ outer_loop_restart:
 	gsKit_deinit_global(gsGlobal); // Free all memory allocated by gsGlobal structures
 	CleanUp();
 
-	InitGSM(predef_vmode_idx, XOffset, YOffset, off_on[skip_videos_idx].value);
+	InitGSM(predef_vmode[predef_vmode_idx].interlace, \
+					predef_vmode[predef_vmode_idx].mode, \
+					predef_vmode[predef_vmode_idx].ffmd, \
+					predef_vmode[predef_vmode_idx].display, \
+					predef_vmode[predef_vmode_idx].syncv, \
+					((predef_vmode[predef_vmode_idx].ffmd)<<1)|(predef_vmode[predef_vmode_idx].interlace), \
+					XOffset, \
+					YOffset, \
+					off_on[skip_videos_idx].value);
 
 	// Call sceSetGsCrt syscall in order to "bite" the new video mode
 	__asm__ __volatile__(
