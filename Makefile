@@ -12,6 +12,8 @@ EE_LIBS = -lmc -lpad -lfileXio -lpatches -ldebug -lc -lkernel -L$(GSKIT)/lib -lg
 
 EE_LDFLAGS =  -nostartfiles -Tlinkfile -L$(PS2SDK)/ee/lib -L$(PS2SDK)/sbv/lib -s
 
+#EE_LDFLAGS += -Xlinker -Map -Xlinker 'uncompressed $(PACKAGE).map'
+
 all: $(EE_BIN)
 	 rm -f 'uncompressed $(PACKAGE).ELF'
 	 mv $(PACKAGE).ELF 'uncompressed $(PACKAGE).ELF'

@@ -1,5 +1,6 @@
 Core:
 - Implemented separate access trap handling for DISPLAY1 and DISPLAY2 registers
+- Now InitGSM function is inside core, for proper integration with other homebrew
 
 GSModeSelector releases (at psx-scene)
 
