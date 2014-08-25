@@ -1,8 +1,8 @@
-Core:
-- Implemented separate access trap handling for DISPLAY1 and DISPLAY2 registers
-- Now InitGSM function is inside core, for proper integration with other homebrew
-
 GSModeSelector releases (at psx-scene)
+
+GSModeSelector v0.38 (2014.08.24) by doctorxyz
+Core:
+- Thunder Pro II Gold v8.7b Modchip patch (useful for POPS stuff...)
 
 GSModeSelector v0.37 (2013.01.20) by doctorxyz
 GUI:
@@ -18,6 +18,9 @@ Core:
 - Added SMODE1, SMODE2, SRFSH, SYNCH1, SYNCH2 and CSR definitions for future features
 - Disabled warning on building time if any statement expands to more than one machine instruction
 - ASM code cosmetics
+- Implemented separate access trap handling for DISPLAY1 and DISPLAY2 registers
+- Now InitGSM function is inside core, for proper integration with other homebrew
+
 
 GSModeSelector v0.36b (2013.01.16) by doctorxyz
 - GUI can be bootable and relaunchable by FCMB E1 launch keys (due to DeInitGSM, New IOP reboot sequence, simplified Makefile, new Launcher based on uLE v4.42a, ...)
