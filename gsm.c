@@ -32,7 +32,7 @@
 #include "pad.h"
 
 #define TITLE			"Graphics Synthesizer Mode Selector"
-#define VERSION			"0.37"
+#define VERSION			"0.38"
 #define AUTHORS			"doctorxyz, dlanor, SP193 and reprep"
 
 #define gsKit_fontm_printf_scaled(gsGlobal, gsFontM, X, Y, Z, scale, color, format, args...) \
@@ -371,6 +371,9 @@ _GSM_ENGINE_ void InitGSM(u32 interlace, u32 mode, u32 ffmd, u64 display, u64 sy
 	*(u32 *)0x80000104 = 0;
 	ee_kmode_exit2();
 	EI2();
+
+	SetVCommonHandler(8, (void *)0x80000280);	//TPIIG Fix
+
 }
 
 /*-------------------*/
