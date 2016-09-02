@@ -2,7 +2,7 @@
 
 PACKAGE = GSM
 EE_BIN = $(PACKAGE).ELF
-EE_OBJS := engine.o gsm.o elf.o loader.o
+EE_OBJS := gsm_engine.o gsm_api.o elf.o loader.o
 EE_OBJS += iomanx.o filexio.o ps2fs.o fakehost.o
 EE_OBJS += timer.o pad.o
 	
